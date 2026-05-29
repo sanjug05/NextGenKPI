@@ -514,11 +514,59 @@ function OwnershipChip({kpiId}){
   </div>;
 }
 
-function DTable({cols,data,onDelete,perms,pageSize=7}){
-  const[pg,setPg]=useState(0);const PS=pageSize,pages=Math.ceil(data.length/PS),rows=data.slice(pg*PS,(pg+1)*PS);
+function DTable({cols,data,onDelete,onEdit,perms,pageSize=7}){
+  const[pg,setPg]=useState(0);
+  const[editRow,setEditRow]=useState(null);
+  const PS=pageSize,pages=Math.ceil(data.length/PS),rows=data.slice(pg*PS,(pg+1)*PS);
+
   if(!data.length)return<div style={{textAlign:'center',padding:'26px 0',color:'rgba(255,255,255,.28)'}}><div style={{fontSize:24,marginBottom:6}}>📋</div><p style={{fontSize:12}}>No records in selected range</p></div>;
-  return<div><div className="tbl-wrap"><table style={{width:'100%',borderCollapse:'collapse',minWidth:520}}><thead><tr>{cols.map(c=><th key={c.key} style={{textAlign:'left',padding:'9px 13px',fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'rgba(255,255,255,.4)',background:'rgba(0,180,216,.07)',whiteSpace:'nowrap'}}>{c.label}</th>)}{perms?.canDelete&&<th style={{padding:'9px 13px',background:'rgba(0,180,216,.07)'}}/>}</tr></thead><tbody>{rows.map((row,i)=><tr key={row.id||i} style={{borderBottom:'1px solid rgba(255,255,255,.05)'}}>{cols.map(c=><td key={c.key} style={{padding:'9px 13px',fontSize:12,color:'rgba(255,255,255,.78)',whiteSpace:'nowrap'}}>{c.render?c.render(row[c.key],row):(row[c.key]??'—')}</td>)}{perms?.canDelete&&onDelete&&<td style={{padding:'9px 13px'}}><button onClick={()=>onDelete(row.id)} style={css.btnD}>Remove</button></td>}</tr>)}</tbody></table></div>
-  {pages>1&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:10}}><span style={{fontSize:11,color:'rgba(255,255,255,.35)'}}>Showing {pg*PS+1}–{Math.min((pg+1)*PS,data.length)} of {data.length}</span><div style={{display:'flex',gap:4}}>{[...Array(pages)].map((_,i)=><button key={i} onClick={()=>setPg(i)} style={{width:27,height:27,borderRadius:7,border:'none',cursor:'pointer',fontWeight:700,fontSize:12,background:pg===i?'#00B4D8':'rgba(255,255,255,.06)',color:pg===i?'#fff':'rgba(255,255,255,.5)'}}>{i+1}</button>)}</div></div>}
+
+  const canEdit = perms?.canAdd; // reuse canAdd permission for edits
+
+  return<div>
+    {/* Edit Modal */}
+    {editRow&&<div onClick={e=>e.target===e.currentTarget&&setEditRow(null)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.72)',backdropFilter:'blur(4px)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:'rgba(13,31,60,.97)',border:'1px solid rgba(255,255,255,.15)',borderRadius:18,width:'100%',maxWidth:520,maxHeight:'85vh',overflowY:'auto',boxShadow:'0 30px 100px rgba(0,0,0,.6)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 18px',borderBottom:'1px solid rgba(255,255,255,.08)'}}>
+          <span style={{fontWeight:700,fontSize:14,color:'#fff'}}>✏️ Edit Record</span>
+          <button onClick={()=>setEditRow(null)} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.12)',color:'#fff',borderRadius:8,cursor:'pointer',padding:'4px 10px',fontSize:16}}>✕</button>
+        </div>
+        <div style={{padding:18,display:'flex',flexDirection:'column',gap:12}}>
+          {cols.filter(c=>c.key!=='_act'&&!c.readOnly).map(c=>(
+            <div key={c.key}>
+              <div style={{fontSize:11,fontWeight:600,color:'rgba(255,255,255,.45)',marginBottom:4}}>{c.label}</div>
+              {c.editOpts
+                ? <select value={editRow[c.key]||''} onChange={e=>setEditRow(r=>({...r,[c.key]:e.target.value}))} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.12)',color:'#fff',borderRadius:8,padding:'8px 12px',outline:'none',fontSize:13,width:'100%',appearance:'none',cursor:'pointer'}}>
+                    {c.editOpts.map(o=><option key={o} value={o}>{o}</option>)}
+                  </select>
+                : <input value={editRow[c.key]||''} onChange={e=>setEditRow(r=>({...r,[c.key]:e.target.value}))} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.12)',color:'#fff',borderRadius:8,padding:'8px 12px',outline:'none',fontSize:13,width:'100%'}}/>
+              }
+            </div>
+          ))}
+          <div style={{display:'flex',gap:10,marginTop:6}}>
+            <button onClick={()=>{onEdit&&onEdit(editRow.id,editRow);setEditRow(null);}} style={{background:'linear-gradient(135deg,#00B4D8,#0096B7)',color:'#fff',border:'none',borderRadius:8,cursor:'pointer',padding:'9px 20px',fontWeight:700,fontSize:13,flex:1}}>💾 Save Changes</button>
+            <button onClick={()=>setEditRow(null)} style={{background:'rgba(255,255,255,.06)',border:'1px solid rgba(255,255,255,.12)',color:'#fff',borderRadius:8,cursor:'pointer',padding:'9px 16px',fontSize:13}}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>}
+
+    <div className="tbl-wrap"><table style={{width:'100%',borderCollapse:'collapse',minWidth:520}}>
+      <thead><tr>
+        {cols.map(c=><th key={c.key} style={{textAlign:'left',padding:'9px 13px',fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'.06em',color:'rgba(255,255,255,.4)',background:'rgba(0,180,216,.07)',whiteSpace:'nowrap'}}>{c.label}</th>)}
+        {(canEdit||perms?.canDelete)&&<th style={{padding:'9px 13px',background:'rgba(0,180,216,.07)'}}/>}
+      </tr></thead>
+      <tbody>{rows.map((row,i)=><tr key={row.id||i} style={{borderBottom:'1px solid rgba(255,255,255,.05)'}}>
+        {cols.map(c=><td key={c.key} style={{padding:'9px 13px',fontSize:12,color:'rgba(255,255,255,.78)',whiteSpace:'nowrap'}}>{c.render?c.render(row[c.key],row):(row[c.key]??'—')}</td>)}
+        {(canEdit||perms?.canDelete)&&<td style={{padding:'9px 13px'}}>
+          <div style={{display:'flex',gap:5}}>
+            {canEdit&&onEdit&&<button onClick={()=>setEditRow({...row})} style={{background:'rgba(0,180,216,.12)',border:'1px solid rgba(0,180,216,.3)',color:'#00B4D8',borderRadius:7,cursor:'pointer',padding:'4px 10px',fontSize:11}}>✏️ Edit</button>}
+            {perms?.canDelete&&onDelete&&<button onClick={()=>onDelete(row.id)} style={{background:'rgba(239,68,68,.15)',border:'1px solid rgba(248,113,113,.3)',color:'#f87171',borderRadius:7,cursor:'pointer',padding:'5px 11px',fontSize:12}}>Remove</button>}
+          </div>
+        </td>}
+      </tr>)}</tbody>
+    </table></div>
+    {pages>1&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:10}}><span style={{fontSize:11,color:'rgba(255,255,255,.35)'}}>Showing {pg*PS+1}–{Math.min((pg+1)*PS,data.length)} of {data.length}</span><div style={{display:'flex',gap:4}}>{[...Array(pages)].map((_,i)=><button key={i} onClick={()=>setPg(i)} style={{width:27,height:27,borderRadius:7,border:'none',cursor:'pointer',fontWeight:700,fontSize:12,background:pg===i?'#00B4D8':'rgba(255,255,255,.06)',color:pg===i?'#fff':'rgba(255,255,255,.5)'}}>{i+1}</button>)}</div></div>}
   </div>;
 }
 
@@ -858,7 +906,7 @@ function ActionCenter({collections,addRecord,deleteRecord,updateRecord,perms,sho
   const actions=useMemo(()=>[...getCol(collections,'ch_action_center')].sort((a,b)=>{const so={Critical:0,High:1,Medium:2,Low:3};return(so[a.severity]||3)-(so[b.severity]||3);}),[collections]);
   const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[filter,setFilter]=useState({status:'All',severity:'All',assignee:'All'});
-  const[form,set,reset]=useForm({title:'',description:'',severity:'Medium',assignedTo:'',reviewer:'',escalationTo:TN[0],sourceKPI:'',zone:'',dueDate:addDays(today(),7),remarks:''});
+  const[form,set,reset]=useForm({title:'',description:'',severity:'Medium',assignedTo:'',reviewer:'',escalationTo:TEAM_NAMES[0],sourceKPI:'',zone:'',dueDate:addDays(today(),7),remarks:''});
 
   const filtered=useMemo(()=>actions.filter(a=>{
     if(filter.status!=='All'&&a.status!==filter.status)return false;
@@ -929,7 +977,7 @@ function ActionCenter({collections,addRecord,deleteRecord,updateRecord,perms,sho
       <span style={{fontSize:11,color:'rgba(255,255,255,.4)',alignSelf:'center'}}>{filtered.length} records</span>
     </div>
 
-    <DTable cols={cols} data={filtered} onDelete={id=>deleteRecord('ch_action_center',id)} perms={perms} pageSize={8}/>
+    <DTable cols={cols} data={filtered} onDelete={id=>deleteRecord('ch_action_center',id)} onEdit={(id, updated) => updateRecord('ch_action_center',id, updated)} perms={perms} pageSize={8}/>
 
     <Modal open={open} onClose={()=>setOpen(false)} title="Create New Action" wide>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
@@ -1019,7 +1067,7 @@ function TaskManager({collections,addRecord,deleteRecord,updateRecord,perms,show
       <span style={{fontSize:11,color:'rgba(255,255,255,.4)',alignSelf:'center'}}>{filtered.length} tasks</span>
     </div>
 
-    <DTable cols={cols} data={filtered} onDelete={id=>deleteRecord('ch_tasks',id)} perms={perms} pageSize={8}/>
+    <DTable cols={cols} data={filtered} onDelete={id=>deleteRecord('ch_tasks',id)} onEdit={(id, updated) => updateRecord('ch_tasks',id, updated)}  perms={perms} pageSize={8}/>
 
     <Modal open={open} onClose={()=>setOpen(false)} title="Create New Task">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
@@ -1038,7 +1086,7 @@ function TaskManager({collections,addRecord,deleteRecord,updateRecord,perms,show
 
 
 /* ═══ RCA TRACKER ════════════════════════════════════════════ */
-function RCATracker({collections,addRecord,deleteRecord,perms,showToast}){
+function RCATracker({collections,addRecord,deleteRecord,updateRecord,perms,showToast}){
   const data=useMemo(()=>[...getCol(collections,'ch_rca_tracker')].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')),[collections]);
   const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({issueType:'',rootCause:'',correctiveAction:'',preventiveAction:'',owner:'',targetDate:addDays(today(),14),zone:'',status:'In Progress',remarks:''});
@@ -1083,7 +1131,7 @@ function RCATracker({collections,addRecord,deleteRecord,perms,showToast}){
         {data.length===0&&<NoData h={120}/>}
       </div>
     </div>
-    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_rca_tracker',id)} perms={perms}/>
+    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_rca_tracker',id)} onEdit={(id, updated) => updateRecord('ch_rca_tracker', id, updated)}  perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Log Root Cause Analysis" wide>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Issue Type" required><Sel value={form.issueType} onChange={v=>set('issueType',v)} opts={[{v:'',l:'Select category'},...RCA_CATEGORIES]}/></FF>
@@ -1347,7 +1395,7 @@ function Overview({getFiltered,setActiveKPI,kpiHealth}){
 
 
 /* ═══ KPI 1-9 ════════════════════════════════════════════════ */
-function KPI1({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI1({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_prospect_funnel');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',prospectName:'',company:'',zone:'',source:'',status:STATUS_PROSPECT[0],channelLead:''});
   const conv=data.filter(d=>d.status==='Converted').length;
@@ -1357,7 +1405,7 @@ function KPI1({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   return(<KPICard title="KPI 01 · Partner Prospect Funnel" desc="Track prospects showing interest in channel partnership" metrics={[{value:data.length,label:'Total Prospects'},{value:conv,label:'Converted',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi1" kpiHealth={kpiHealth}>
     <G2 left={<><SL text="Activation Funnel"/>{[['Interested',data.length,'#00B4D8'],['Follow-up',data.filter(d=>d.status==='Follow-up').length,'#FFD700'],['Converted',conv,'#4ade80']].map(([n,v,c])=><div key={n} style={{marginBottom:9}}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:'rgba(255,255,255,.6)'}}>{n}</span><span style={{color:c,fontWeight:700}}>{v}</span></div><div style={{height:24,borderRadius:7,background:`${c}14`,border:`1px solid ${c}28`,width:`${Math.max(data.length?(v/data.length)*100:12,12)}%`,minWidth:70,display:'flex',alignItems:'center',paddingLeft:9}}><span style={{fontSize:11,color:c,fontWeight:700}}>{data.length?Math.round((v/data.length)*100):0}%</span></div></div>)}</>}
       right={<><SL text="By Lead Source"/><BarChartSVG data={bySrc} bars={[{key:'count',label:'Count'}]} xKey="source" colors={['#00B4D8']} height={165}/></>}/>
-    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_prospect_funnel',id)} perms={perms}/>
+    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_prospect_funnel',id)} onEdit={(id, updated) => updateRecord('ch_prospect_funnel', id, updated)}  perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add Prospect to Funnel">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1373,7 +1421,7 @@ function KPI1({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   </KPICard>);
 }
 
-function KPI2({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI2({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_shortlisted');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',prospectName:'',company:'',zone:'',shortlistDate:'',status:'Active',channelLead:''});
   const monthly=MONTHS.map(({m,p})=>({month:m,shortlisted:data.filter(d=>d.date?.startsWith(p)).length,target:KPI_CONFIG.shortlistMonthly.target}));
@@ -1382,7 +1430,7 @@ function KPI2({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   return(<KPICard title="KPI 02 · Prospect Shortlisting" desc="Track prospects shortlisted for channel partnership evaluation" metrics={[{value:data.length,label:'Total'},{value:data.filter(d=>d.status==='Active').length,label:'Active',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi2" kpiHealth={kpiHealth}>
     <SL text={`Monthly vs Target (${KPI_CONFIG.shortlistMonthly.target}/month)`}/>
     <BarChartSVG data={monthly} bars={[{key:'shortlisted',label:'Shortlisted'},{key:'target',label:'Target'}]} colors={['#00B4D8','rgba(255,255,255,.12)']} height={165}/>
-    <div style={{marginTop:16}}><DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_shortlisted',id)} perms={perms}/></div>
+    <div style={{marginTop:16}}><DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_shortlisted',id)} onEdit={(id, updated) => updateRecord('ch_shortlisted', id, updated)} perms={perms}/></div>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add Shortlisted Prospect">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1398,7 +1446,7 @@ function KPI2({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   </KPICard>);
 }
 
-function KPI3({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI3({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_prospect_cft');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',prospectName:'',company:'',zone:'',cftDate:'',result:'Pass',channelLead:''});
   const passed=data.filter(d=>d.result==='Pass').length,passRate=safePct(passed,data.length);
@@ -1408,7 +1456,7 @@ function KPI3({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   return(<KPICard title="KPI 03 · Partner CFT Clearance" desc="Track Channel Partner Field Test clearances" metrics={[{value:data.length,label:'Total CFTs'},{value:`${passRate}%`,label:'Pass Rate',color:passRate>=KPI_CONFIG.cftPassRate.target?'#4ade80':'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi3" kpiHealth={kpiHealth}>
     <G2 left={<><SL text="Cumulative CFT Trend"/><AreaChartSVG data={cumul} areas={[{key:'total',label:'Total'},{key:'pass',label:'Cleared',dash:true}]} colors={['#00B4D8','#4ade80']} height={165}/></>}
       right={<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%'}}><Gauge value={passRate} label={`Pass Rate (target ${KPI_CONFIG.cftPassRate.target}%)`} color={passRate>=KPI_CONFIG.cftPassRate.target?'#4ade80':'#FFD700'} size={150}/><div style={{display:'flex',gap:20,marginTop:10}}>{[[passed,'#4ade80','Cleared'],[data.length-passed,'#f87171','Not Cleared']].map(([v,c,l])=><div key={l} style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div><div style={{fontSize:10,color:'rgba(255,255,255,.4)'}}>{l}</div></div>)}</div></div>}/>
-    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_prospect_cft',id)} perms={perms}/>
+    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_prospect_cft',id)} onEdit={(id, updated) => updateRecord('ch_prospect_cft', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add CFT Clearance Record">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1424,7 +1472,7 @@ function KPI3({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   </KPICard>);
 }
 
-function KPI4({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI4({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_partner_addition');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',partnerName:'',zone:'',partnerType:'Dealer',onboardingDate:'',status:'Active',channelLead:''});
   const active=data.filter(d=>d.status==='Active').length;
@@ -1436,7 +1484,7 @@ function KPI4({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   return(<KPICard title="KPI 04 · Partner Onboarding" desc="Track new channel partners onboarded across India" metrics={[{value:data.length,label:'Total Onboarded'},{value:active,label:'Active',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi4" kpiHealth={kpiHealth}>
     <G2 left={<><SL text={`Monthly vs Target (${KPI_CONFIG.partnerMonthly.target}/month)`}/><BarChartSVG data={monthly} bars={[{key:'onboarded',label:'Onboarded'},{key:'target',label:'Target'}]} colors={['#4ade80','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="Partner Type Mix"/><div style={{display:'flex',flexDirection:'column',gap:9,marginBottom:12}}>{byType.map(t=><div key={t.name}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:'rgba(255,255,255,.6)'}}>{t.name}</span><b style={{color:'#fff'}}>{t.value}</b></div><div style={{height:6,borderRadius:3,background:'rgba(255,255,255,.06)'}}><div style={{width:`${data.length?(t.value/data.length)*100:0}%`,height:'100%',borderRadius:3,background:t.color}}/></div></div>)}</div><SL text="By Zone"/><DonutChartSVG data={byZone} labelKey="zone" valueKey="count" colors={ZONES.map(z=>ZONE_COLORS[z])} height={130}/></>}/>
-    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_partner_addition',id)} perms={perms}/>
+    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_partner_addition',id)} onEdit={(id, updated) => updateRecord('ch_partner_addition', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add Channel Partner">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1452,7 +1500,7 @@ function KPI4({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   </KPICard>);
 }
 
-function KPI5({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI5({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_showroom_cad');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',showroomName:'',zone:'',cadType:'Full Layout',completionDate:'',designerName:'',status:'Completed'});
   const completed=data.filter(d=>d.status==='Completed').length;
@@ -1463,7 +1511,7 @@ function KPI5({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   return(<KPICard title="KPI 05 · Showroom CAD Completion" desc="Track CAD designs completed for channel partner showrooms" metrics={[{value:data.length,label:'Total CADs'},{value:`${safePct(completed,data.length)}%`,label:'Completion',color:'#a78bfa'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi5" kpiHealth={kpiHealth}>
     <G2 left={<><SL text="Cumulative Completion"/><AreaChartSVG data={cumul} areas={[{key:'completed',label:'Completed'}]} colors={['#a78bfa']} height={165}/></>}
       right={<><SL text="By CAD Type"/><div style={{display:'flex',flexDirection:'column',gap:9,marginBottom:14}}>{byType.map(t=><div key={t.type}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:'rgba(255,255,255,.6)'}}>{t.type}</span><b style={{color:'#fff'}}>{t.count}</b></div><div style={{height:6,borderRadius:3,background:'rgba(255,255,255,.06)'}}><div style={{width:`${data.length?(t.count/data.length)*100:0}%`,height:'100%',borderRadius:3,background:t.color}}/></div></div>)}</div><Gauge value={safePct(completed,data.length)} label="Completion %" color="#a78bfa" size={130}/></>}/>
-    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_cad',id)} perms={perms}/>
+    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_cad',id)} onEdit={(id, updated) => updateRecord('ch_showroom_cad', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add CAD Record">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1479,7 +1527,7 @@ function KPI5({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   </KPICard>);
 }
 
-function KPI6({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI6({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_showroom_addition');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',showroomName:'',zone:'',location:'',showroomType:'A',openingDate:'',status:'Opened'});
   const opened=data.filter(d=>d.status==='Opened').length;
@@ -1489,7 +1537,7 @@ function KPI6({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   return(<KPICard title="KPI 06 · Showroom Launch" desc="Track new partner showrooms commissioned across India" metrics={[{value:data.length,label:'Total'},{value:opened,label:'Launched',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi6" kpiHealth={kpiHealth}>
     <G2 left={<><SL text={`Monthly vs Target (${KPI_CONFIG.showroomMonthly.target}/month)`}/><BarChartSVG data={monthly} bars={[{key:'launched',label:'Launched'},{key:'target',label:'Target'}]} colors={['#FFD700','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="By Grade"/><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9}}>{SHOWROOM_GRADES.map((g,i)=><div key={g} style={{borderRadius:11,padding:'11px',textAlign:'center',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.07)'}}><div style={{fontSize:22,fontWeight:800,color:['#FFD700','#00B4D8','#a78bfa','#fb923c'][i],lineHeight:1}}>{data.filter(d=>d.showroomType===g).length}</div><div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginTop:3}}>Grade {g}</div></div>)}</div></>}/>
-    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_addition',id)} perms={perms}/>
+    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_addition',id)} onEdit={(id, updated) => updateRecord('ch_showroom_addition', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Record Showroom Launch">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1505,7 +1553,7 @@ function KPI6({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   </KPICard>);
 }
 
-function KPI7({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI7({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_partner_survey');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',partnerName:'',zone:'',surveyType:'Monthly',score:'',remarks:''});
   const avg=avgOf(data,'score');
@@ -1515,7 +1563,7 @@ function KPI7({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   const add=async()=>{if(!chkForm(form,[['date','Date required'],['partnerName','Partner required'],['score','Score required',isScore]],showToast))return;setSaving(true);await addRecord('ch_partner_survey',{...form,score:+form.score},{trigger:'survey_low'});showToast('Survey recorded');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 07 · Partner NPS Survey" desc="Track partner satisfaction Net Promoter Scores" metrics={[{value:data.length,label:'Surveys'},{value:avg,label:'Avg NPS',color:'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi7" kpiHealth={kpiHealth}>
     <G2 left={<><SL text="Monthly Surveys vs Target"/><BarChartSVG data={monthly} bars={[{key:'surveys',label:'Surveys'},{key:'target',label:'Target'}]} colors={['#f472b6','rgba(255,255,255,.12)']} height={165}/></>} right={<><SL text="Parameter Radar"/><RadarChartSVG data={radar} color="#f472b6" height={210}/></>}/>
-    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_partner_survey',id)} perms={perms}/>
+    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_partner_survey',id)} onEdit={(id, updated) => updateRecord('ch_partner_survey', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add Partner NPS Survey">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1530,7 +1578,7 @@ function KPI7({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   </KPICard>);
 }
 
-function KPI8({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI8({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_showroom_audit');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',showroomName:'',zone:'',auditorName:'',auditType:'A',score:'',remarks:''});
   const avg=avgOf(data,'score');
@@ -1540,7 +1588,7 @@ function KPI8({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   const add=async()=>{if(!chkForm(form,[['date','Date required'],['showroomName','Showroom required'],['score','Score required',isScore]],showToast))return;setSaving(true);await addRecord('ch_showroom_audit',{...form,score:+form.score},{trigger:'audit_low'});showToast('Audit recorded');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 08 · Showroom Audit" desc="Track showroom audits across the channel network" metrics={[{value:data.length,label:'Audits Done'},{value:`${avg}%`,label:'Avg Score',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi8" kpiHealth={kpiHealth}>
     <G2 left={<><SL text="Planned vs Actual Audits"/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'planned',label:'Planned'}]} colors={['#fb923c','rgba(255,255,255,.12)']} height={165}/></>} right={<><SL text="Cumulative Audit Trend"/><AreaChartSVG data={cumul} areas={[{key:'total',label:'Total'},{key:'aPlus',label:'A+',dash:true}]} colors={['#fb923c','#FFD700']} height={165}/></>}/>
-    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_audit',id)} perms={perms}/>
+    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_audit',id)} onEdit={(id, updated) => updateRecord('ch_showroom_audit', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add Showroom Audit Record">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1556,7 +1604,7 @@ function KPI8({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   </KPICard>);
 }
 
-function KPI9({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI9({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_rnr');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',recipientName:'',zone:'',rewardType:'Monthly',category:'Top Channel Lead',amount:'',remarks:''});
   const totalAmt=sumOf(data,'amount');
@@ -1567,7 +1615,7 @@ function KPI9({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   return(<KPICard title="KPI 09 · R&R Programme" desc="Track Rewards & Recognition awards" metrics={[{value:data.length,label:'Total Awards',color:'#FFD700'},{value:fmtK(totalAmt),label:'Total Amount',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi9" kpiHealth={kpiHealth}>
     <G2 left={<><SL text="Monthly R&R Count vs Plan"/><BarChartSVG data={monthly} bars={[{key:'count',label:'Awarded'},{key:'plan',label:'Plan'}]} colors={['#FFD700','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="By Award Category"/><div style={{display:'flex',flexDirection:'column',gap:9,marginBottom:14}}>{byCat.map(c=><div key={c.name} style={{display:'flex',alignItems:'center',gap:9}}><span style={{fontSize:11,color:'rgba(255,255,255,.6)',width:100,flexShrink:0}}>{c.name}</span><div style={{flex:1,height:18,borderRadius:5,background:'rgba(255,255,255,.05)'}}><div style={{width:`${data.length?(c.value/data.length)*100:0}%`,height:'100%',borderRadius:5,background:c.color}}/></div><b style={{fontSize:12,color:'#fff',minWidth:16,textAlign:'right'}}>{c.value}</b></div>)}</div></>}/>
-    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_rnr',id)} perms={perms}/>
+    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_rnr',id)} onEdit={(id, updated) => updateRecord('ch_rnr', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add R&R Award">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1585,7 +1633,7 @@ function KPI9({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
 
 
 /* ═══ GENERIC FinancialKPI + ScoreKPI ══════════════════════ */
-function FinancialKPI({title,desc,col,amtKey,planKey,color,isLakhs,extraCols=[],addFields,perms,showToast,getFiltered,addRecord,deleteRecord,kpiId,kpiHealth}){
+function FinancialKPI({title,desc,col,amtKey,planKey,color,isLakhs,extraCols=[],addFields,perms,showToast,getFiltered,addRecord,deleteRecord,updateRecord,kpiId,kpiHealth}){
   const data=getFiltered(col);const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const init=addFields.reduce((a,f)=>({...a,[f.key]:f.default||''}),{});const[form,set,reset]=useForm(init);
   const totalA=sumOf(data,amtKey),totalP=sumOf(data,planKey),ach=safePct(totalA,totalP);
@@ -1597,7 +1645,7 @@ function FinancialKPI({title,desc,col,amtKey,planKey,color,isLakhs,extraCols=[],
   return(<KPICard title={title} desc={desc} metrics={[{value:isLakhs?fmtLakhs(totalA):fmtK(totalA),label:'Total Recovered',color},{value:`${ach}%`,label:'Achievement',color:ach>=100?'#4ade80':'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId={kpiId} kpiHealth={kpiHealth}>
     <G2 left={<><SL text="Monthly Plan vs Actual"/><BarChartSVG data={monthly} bars={[{key:'plan',label:'Plan'},{key:'actual',label:'Actual'}]} colors={['rgba(255,255,255,.12)',color]} formatY={isLakhs?v=>`₹${v}L`:undefined} height={165}/></>}
       right={<><SL text="Cumulative Recovery Trend"/><AreaChartSVG data={cumul} areas={[{key:'plan',label:'Plan',dash:true},{key:'actual',label:'Actual'}]} colors={['#FFD700',color]} formatY={isLakhs?v=>`₹${v}L`:undefined} height={165}/></>}/>
-    <DTable cols={baseCols} data={data} onDelete={id=>deleteRecord(col,id)} perms={perms}/>
+    <DTable cols={baseCols} data={data} onDelete={id=>deleteRecord(col,id)} onEdit={(id,updated)=>updateRecord(col,id,updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title={`Add — ${title.split('·')[1]?.trim()||'Record'}`}>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         {addFields.map(f=><FF key={f.key} label={f.label} required={f.required}>{f.type==='select'?<Sel value={form[f.key]} onChange={v=>set(f.key,v)} opts={f.opts}/>:f.type==='team'?<TeamSel value={form[f.key]} onChange={v=>set(f.key,v)}/>:<input type={f.type||'text'} min={f.min} step={f.step} value={form[f.key]} onChange={e=>set(f.key,e.target.value)} placeholder={f.ph||''} style={css.inp}/>}</FF>)}
@@ -1607,7 +1655,7 @@ function FinancialKPI({title,desc,col,amtKey,planKey,color,isLakhs,extraCols=[],
   </KPICard>);
 }
 
-function ScoreKPI({title,desc,col,scoreKey,color,radarParams,extraCols=[],addFields,perms,showToast,getFiltered,addRecord,deleteRecord,kpiId,kpiHealth}){
+function ScoreKPI({title,desc,col,scoreKey,color,radarParams,extraCols=[],addFields,perms,showToast,getFiltered,addRecord,deleteRecord,updateRecord,kpiId,kpiHealth}){
   const data=getFiltered(col);const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const init=addFields.reduce((a,f)=>({...a,[f.key]:f.default||''}),{});const[form,set,reset]=useForm(init);
   const avg=avgOf(data,scoreKey);
@@ -1618,7 +1666,7 @@ function ScoreKPI({title,desc,col,scoreKey,color,radarParams,extraCols=[],addFie
   return(<KPICard title={title} desc={desc} metrics={[{value:`${avg}/100`,label:'Average Score',color:avg>=85?'#4ade80':'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId={kpiId} kpiHealth={kpiHealth}>
     <G2 left={<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%'}}><Gauge value={avg} label="Avg Score (target 85%)" color={avg>=85?'#4ade80':'#FFD700'} size={155}/><div style={{display:'grid',gridTemplateColumns:`repeat(${Math.min(radarParams.length,4)},1fr)`,gap:8,marginTop:12,width:'100%'}}>{radarData.map((p,i)=><div key={p.subject} style={{borderRadius:9,padding:'9px 6px',textAlign:'center',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.07)'}}><div style={{fontSize:17,fontWeight:800,color:PCOLS[i%4],lineHeight:1}}>{p.value}%</div><div style={{fontSize:9,color:'rgba(255,255,255,.4)',marginTop:2}}>{p.subject}</div></div>)}</div></div>}
       right={<><SL text="Parameter Score Radar"/><RadarChartSVG data={radarData} color={color} height={230}/></>}/>
-    <DTable cols={baseCols} data={data} onDelete={id=>deleteRecord(col,id)} perms={perms}/>
+    <DTable cols={baseCols} data={data} onDelete={id=>deleteRecord(col,id)} onEdit={(id,updated)=>updateRecord(col,id,updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title={`Add — ${title.split('·')[1]?.trim()||'Score'}`}>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>{addFields.map(f=><FF key={f.key} label={f.label} required={f.required}>{f.type==='select'?<Sel value={form[f.key]} onChange={v=>set(f.key,v)} opts={f.opts}/>:<input type={f.type||'text'} min={f.min} max={f.max} value={form[f.key]} onChange={e=>set(f.key,e.target.value)} placeholder={f.ph||''} style={css.inp}/>}</FF>)}</div>
       <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Add Score</button></div>
@@ -1627,7 +1675,7 @@ function ScoreKPI({title,desc,col,scoreKey,color,radarParams,extraCols=[],addFie
 }
 
 /* ═══ KPI 15 ════════════════════════════════════════════════ */
-function KPI15({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI15({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_cft_feedback');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',prospectName:'',company:'',zone:'',cftDate:'',feedbackScore:'',adherenceStatus:'Adhered',remarks:''});
   const adhered=data.filter(d=>d.adherenceStatus==='Adhered').length,partial=data.filter(d=>d.adherenceStatus==='Partial').length,notAdh=data.filter(d=>d.adherenceStatus==='Not Adhered').length;
@@ -1638,7 +1686,7 @@ function KPI15({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
   return(<KPICard title="KPI 15 · CFT Feedback SLA Adherence" desc="Track SLA compliance for CFT feedback submissions" metrics={[{value:`${adherPct}%`,label:'SLA Adhered',color:adherPct>=KPI_CONFIG.feedbackAdherence.target?'#4ade80':'#FFD700'},{value:`${avgScore}/100`,label:'Avg Score',color:'#00B4D8'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi15" kpiHealth={kpiHealth}>
     <G2 left={<><div style={{display:'flex',justifyContent:'center'}}><Gauge value={adherPct} label={`SLA Adherence (target ${KPI_CONFIG.feedbackAdherence.target}%)`} color={adherPct>=KPI_CONFIG.feedbackAdherence.target?'#4ade80':'#FFD700'} size={155}/></div><div style={{display:'flex',justifyContent:'center',gap:20,marginTop:10}}>{[[adhered,'#4ade80','Adhered'],[partial,'#FFD700','Partial'],[notAdh,'#f87171','Missed']].map(([v,c,l])=><div key={l} style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:800,color:c,lineHeight:1}}>{v}</div><div style={{fontSize:9,color:'rgba(255,255,255,.4)',marginTop:2}}>{l}</div></div>)}</div></>}
       right={<><SL text="Monthly SLA Adherence Trend"/><BarChartSVG data={monthly} bars={[{key:'adhered',label:'Adhered'},{key:'partial',label:'Partial'},{key:'missed',label:'Missed'}]} colors={['#4ade80','#FFD700','#f87171']} height={210}/></>}/>
-    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_cft_feedback',id)} perms={perms}/>
+    <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_cft_feedback',id)} onEdit={(id,updated)=>updateRecord('ch_cft_feedback',id,updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add CFT Feedback SLA Record">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1656,7 +1704,7 @@ function KPI15({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
 }
 
 /* ═══ KPI 16 ════════════════════════════════════════════════ */
-function KPI16({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
+function KPI16({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
   const data=getFiltered('ch_cad_tat');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',projectName:'',zone:'',requestDate:'',deliveryDate:'',designerName:'',status:'Delivered'});
   const delivered=data.filter(d=>d.tat!=null),avgTAT=delivered.length?(delivered.reduce((s,d)=>s+(+d.tat||0),0)/delivered.length).toFixed(1):0;
@@ -1671,7 +1719,7 @@ function KPI16({getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth}){
       right={<><SL text="Monthly SLA Adherence"/><BarChartSVG data={slaData} bars={[{key:'onTime',label:'On Time'},{key:'delayed',label:'Delayed'}]} colors={['#4ade80','#f87171']} height={140}/><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:12}}><div style={{borderRadius:11,padding:'11px',textAlign:'center',background:'rgba(74,222,128,.08)',border:'1px solid rgba(74,222,128,.2)'}}><div style={{fontSize:22,fontWeight:800,color:'#4ade80',lineHeight:1}}>{onTime}</div><div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginTop:3}}>On Time (≤{KPI_CONFIG.cadTAT.target}d)</div></div><div style={{borderRadius:11,padding:'11px',textAlign:'center',background:'rgba(248,113,113,.08)',border:'1px solid rgba(248,113,113,.2)'}}><div style={{fontSize:22,fontWeight:800,color:'#f87171',lineHeight:1}}>{delivered.length-onTime}</div><div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginTop:3}}>Delayed</div></div></div></>}/>
     <SL text="Zone-wise Avg TAT (days)"/>
     <BarChartSVG data={zoneAvg} bars={[{key:'avg',label:'Avg TAT'}]} xKey="zone" colors={['#00B4D8']} refLine={KPI_CONFIG.cadTAT.target} formatY={v=>`${v}d`} height={145}/>
-    <div style={{marginTop:14}}><DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_cad_tat',id)} perms={perms}/></div>
+    <div style={{marginTop:14}}><DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_cad_tat',id)} onEdit={(id,updated)=>updateRecord('ch_cad_tat',id,updated)} perms={perms}/></div>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add CAD Turnaround Record">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
@@ -1762,14 +1810,15 @@ function App(){
   if(!auth||auth.loading)return<LoadingScreen/>;
   if(!auth.user&&!auth.viewOnly)return<AuthPage onLogin={loginEmail} onViewOnly={loginViewOnly}/>;
 
-  const kp={getFiltered,addRecord,deleteRecord,perms,showToast,kpiHealth:safeKpiHealth};
+  const kp={getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth:safeKpiHealth};
+
 
   function renderPage(){switch(activeKPI){
     case'executive': return<ExecutiveCommandCenter collections={safeCollections} getFiltered={getFiltered} setActiveKPI={setActiveKPI} kpiHealth={safeKpiHealth}/>;
     case'overview':  return<Overview getFiltered={getFiltered} setActiveKPI={setActiveKPI} kpiHealth={safeKpiHealth}/>;
     case'actions':   return<ActionCenter collections={safeCollections} addRecord={addRecord} deleteRecord={deleteRecord} updateRecord={updateRecord} perms={perms} showToast={showToast}/>;
     case'tasks':     return<TaskManager collections={safeCollections} addRecord={addRecord} deleteRecord={deleteRecord} updateRecord={updateRecord} perms={perms} showToast={showToast} auth={auth}/>;
-    case'rca':       return<RCATracker collections={safeCollections} addRecord={addRecord} deleteRecord={deleteRecord} perms={perms} showToast={showToast}/>;
+    case'rca':       return<RCATracker collections={safeCollections} addRecord={addRecord} deleteRecord={deleteRecord} updateRecord={updateRecord} perms={perms} showToast={showToast}/>;
     case'leaderboard':return<Leaderboard collections={safeCollections}/>;
     case'analytics': return<Analytics getFiltered={getFiltered}/>;
     case'reports':   return<ReportsEngine collections={safeCollections} getFiltered={getFiltered}/>;
