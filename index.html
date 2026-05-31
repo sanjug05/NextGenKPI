@@ -393,12 +393,20 @@ function useAppState(){
   const setMonthlyTarget=useCallback(async(kpiId,month,target)=>{
     const id=`${kpiId}_${month}`;
     const doc={id,kpiId,month,target:+target,updatedBy:authRef.current.user?.name||'Admin',updatedAt:new Date().toISOString()};
+    // Optimistic local update first
     setCollections(prev=>{const ex=(prev.ch_targets||[]).filter(t=>!(t.kpiId===kpiId&&t.month===month));return{...prev,ch_targets:[...ex,doc]};});
-    try{await fbDb.collection('ch_targets').doc(id).set(doc);}catch(e){showToast('Target save failed','error');}
-  },[showToast]);
+    // Also update collectionsRef immediately so getTarget reads new value right away
+    if(!collectionsRef.current.ch_targets)collectionsRef.current.ch_targets=[];
+    const existing=collectionsRef.current.ch_targets.filter(t=>!(t.kpiId===kpiId&&t.month===month));
+    collectionsRef.current.ch_targets=[...existing,doc];
+    // Persist to Firestore — throw so caller can handle
+    await fbDb.collection('ch_targets').doc(id).set(doc);
+  },[]);
 
   const getTarget=useCallback((kpiId,month)=>{
-    const t=(collectionsRef.current.ch_targets||[]).find(t=>t.kpiId===kpiId&&t.month===month);
+    // Check both ref (latest writes) and state (loaded from Firestore)
+    const arr=collectionsRef.current.ch_targets||[];
+    const t=arr.find(t=>t.kpiId===kpiId&&t.month===month);
     return t?+t.target:0;
   },[]);
 
@@ -537,16 +545,30 @@ function FYBand({kpiId,actual,getTarget,color='#00B4D8'}){
 /* ═══ TARGET SETTER MODAL ════════════════════════════════════ */
 function TargetSetter({kpiId,kpiLabel,setMonthlyTarget,getTarget,perms,showToast}){
   const[open,setOpen]=useState(false);
+  const[saving,setSaving]=useState(false);
   const[targets,setTargets]=useState(()=>MONTHS.reduce((a,{p})=>({...a,[p]:getTarget(kpiId,p)||''}),{}));
   if(!perms?.canAdd)return null;
   const save=async()=>{
-    const entries=Object.entries(targets);
-    for(const[month,val]of entries){if(val!=='')await setMonthlyTarget(kpiId,month,+val);}
-    showToast('Targets saved successfully');setOpen(false);
+    setSaving(true);
+    try{
+      const entries=Object.entries(targets).filter(([,val])=>val!=='');
+      if(entries.length===0){showToast('No targets entered','warning');setSaving(false);return;}
+      await Promise.all(entries.map(([month,val])=>setMonthlyTarget(kpiId,month,+val)));
+      showToast(`✅ ${entries.length} target${entries.length>1?'s':''} saved`);
+      setOpen(false);
+    }catch(e){
+      console.error('Target save error:',e);
+      showToast('Save failed — check Firestore rules for ch_targets','error');
+    }
+    setSaving(false);
   };
   const fill=()=>{const first=Object.values(targets).find(v=>v!=='');if(!first)return;setTargets(MONTHS.reduce((a,{p})=>({...a,[p]:first}),{}));};
   return(<>
-    <button onClick={()=>{setTargets(MONTHS.reduce((a,{p})=>({...a,[p]:getTarget(kpiId,p)||''}),{}));setOpen(true);}} style={{...css.btnSm,color:'#FFD700',border:'1px solid rgba(255,215,0,.3)',background:'rgba(255,215,0,.08)',display:'flex',alignItems:'center',gap:4,fontSize:11}}>🎯 Set Targets</button>
+    <button onClick={()=>{
+      // Always refresh from current stored targets when opening
+      setTargets(MONTHS.reduce((a,{p})=>({...a,[p]:getTarget(kpiId,p)||''}),{}));
+      setOpen(true);
+    }} style={{...css.btnSm,color:'#FFD700',border:'1px solid rgba(255,215,0,.3)',background:'rgba(255,215,0,.08)',display:'flex',alignItems:'center',gap:4,fontSize:11}}>🎯 Set Targets</button>
     <Modal open={open} onClose={()=>setOpen(false)} title={`Set Monthly Targets — ${kpiLabel}`} wide>
       <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:12}}>Enter count targets for each month of {FY_LABEL}. Leave blank to keep existing.</div>
       <div style={{display:'flex',gap:8,marginBottom:12}}>
@@ -560,7 +582,7 @@ function TargetSetter({kpiId,kpiLabel,setMonthlyTarget,getTarget,perms,showToast
           </div>
         ))}
       </div>
-      <div style={{display:'flex',gap:10}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={save} style={{...css.btnP,flex:1}}>💾 Save All Targets</button></div>
+      <div style={{display:'flex',gap:10}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}} disabled={saving}>Cancel</button><button onClick={save} style={{...css.btnP,flex:1,opacity:saving?.6:1}} disabled={saving}>{saving?'Saving…':'💾 Save All Targets'}</button></div>
     </Modal>
   </>);
 }
