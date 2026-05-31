@@ -134,14 +134,14 @@ const COL_META={
 };
 
 const ALL_COLS=Object.keys(COL_META);
-const MONTHS=[{m:'Oct',p:'2025-10'},{m:'Nov',p:'2025-11'},{m:'Dec',p:'2025-12'}];
+function getFYMonths(){const n=new Date();const fy=n.getMonth()>=3?n.getFullYear():n.getFullYear()-1;const r=[];for(let i=0;i<12;i++){const d=new Date(fy,3+i);r.push({m:d.toLocaleString('en-IN',{month:'short'})+' '+(d.getFullYear()+'').slice(2),p:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`});}return r;}
+const MONTHS=getFYMonths();
+const CURRENT_MONTH=(()=>{const n=new Date();return`${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`;})();
+const FY_LABEL=`FY ${MONTHS[0].p.slice(0,4)}-${MONTHS[11].p.slice(2,4)}`;
+const ELAPSED_MONTHS=MONTHS.filter(({p})=>p<CURRENT_MONTH).length;
+const FY_START=`${MONTHS[0].p}-01`;const FY_END=`${MONTHS[11].p}-31`;
 const ZONE_COLORS={RON:'#00B4D8',South:'#4ade80',East:'#FFD700',West:'#f472b6',DelhiNCR:'#a78bfa'};
-const DATE_PRESETS=[
-  {label:'Oct 2025',start:'2025-10-01',end:'2025-10-31'},
-  {label:'Nov 2025',start:'2025-11-01',end:'2025-11-30'},
-  {label:'Dec 2025',start:'2025-12-01',end:'2025-12-31'},
-  {label:'Q4 2025',start:'2025-10-01',end:'2025-12-31'},
-];
+const DATE_PRESETS=[...MONTHS.slice(0,Math.min(ELAPSED_MONTHS+1,12)).map(({m,p})=>{const[y,mo]=[+p.slice(0,4),+p.slice(5)];return{label:m,start:`${p}-01`,end:`${p}-${new Date(y,mo,0).getDate()}`};}),{label:`Full ${FY_LABEL}`,start:FY_START,end:FY_END}];
 
 const T={navy:'#0A1628',teal:'#00B4D8',gold:'#FFD700',green:'#4ade80',red:'#f87171',purple:'#a78bfa',orange:'#fb923c',pink:'#f472b6',glass:'rgba(255,255,255,0.06)',glassMd:'rgba(255,255,255,0.09)',border:'rgba(255,255,255,0.12)'};
 const css={
@@ -192,7 +192,7 @@ function useAppState(){
   const[auth,setAuth]=useState({user:null,viewOnly:false,loading:true});
   const[activeKPI,setActiveKPI]=useState('overview');
   const[sidebarCollapsed,setSidebarCollapsed]=useState(false);
-  const[dateRange,setDateRange]=useState({start:'2025-10-01',end:'2025-12-31'});
+  const[dateRange,setDateRange]=useState({start:FY_START,end:FY_END});
   const[selectedZone,setSelectedZone]=useState('All');
   const[collections,setCollections]=useState(()=>ALL_COLS.reduce((a,k)=>({...a,[k]:[]}),{}));
   const[toast,setToast]=useState(null);
@@ -388,7 +388,25 @@ function useAppState(){
     }catch{return{};}
   },[collections]);
 
-  return{auth,loginEmail,loginViewOnly,logout,perms,activeKPI,setActiveKPI,sidebarCollapsed,setSidebarCollapsed,dateRange,setDateRange,selectedZone,setSelectedZone,globalFilters,setGlobalFilters,compactMode,setCompactMode,addRecord,deleteRecord,updateRecord,getFiltered,showToast,toast,isLoading,isSyncing,lastSyncTime,isOnline,refreshData,exportCSV,kpiHealth,triggerWorkflow,collections};
+
+  /* ── Target management ── */
+  const setMonthlyTarget=useCallback(async(kpiId,month,target)=>{
+    const id=`${kpiId}_${month}`;
+    const doc={id,kpiId,month,target:+target,updatedBy:authRef.current.user?.name||'Admin',updatedAt:new Date().toISOString()};
+    setCollections(prev=>{const ex=(prev.ch_targets||[]).filter(t=>!(t.kpiId===kpiId&&t.month===month));return{...prev,ch_targets:[...ex,doc]};});
+    try{await fbDb.collection('ch_targets').doc(id).set(doc);}catch(e){showToast('Target save failed','error');}
+  },[showToast]);
+
+  const getTarget=useCallback((kpiId,month)=>{
+    const t=(collectionsRef.current.ch_targets||[]).find(t=>t.kpiId===kpiId&&t.month===month);
+    return t?+t.target:0;
+  },[]);
+
+  const getAllTargets=useCallback((kpiId)=>{
+    return MONTHS.map(({p})=>getTarget(kpiId,p));
+  },[getTarget]);
+
+  return{auth,loginEmail,loginViewOnly,logout,perms,activeKPI,setActiveKPI,sidebarCollapsed,setSidebarCollapsed,dateRange,setDateRange,selectedZone,setSelectedZone,globalFilters,setGlobalFilters,compactMode,setCompactMode,addRecord,deleteRecord,updateRecord,getFiltered,showToast,toast,isLoading,isSyncing,lastSyncTime,isOnline,refreshData,exportCSV,kpiHealth,triggerWorkflow,collections,setMonthlyTarget,getTarget,getAllTargets};
 }
 
 function useForm(init){const[form,setForm]=useState(init);const set=(k,v)=>setForm(f=>({...f,[k]:v}));const reset=()=>setForm(init);return[form,set,reset];}
@@ -481,6 +499,135 @@ function Gauge({value,max=100,label,color='#00B4D8',size=155}){
   const xy=(a,rad)=>({x:cx+rad*Math.cos(a),y:cy+rad*Math.sin(a)});
   const s=xy(st,r),e=xy(en,r),v=xy(st+pct*(en-st),r),lg=(en-st)>Math.PI,lv=(pct*(en-st))>Math.PI;
   return(<div style={{textAlign:'center'}}><svg width={size} height={size*.73} viewBox={`0 0 ${size} ${size}`} style={{overflow:'visible'}}><path d={`M${s.x},${s.y} A${r},${r} 0 ${lg?1:0} 1 ${e.x},${e.y}`} fill="none" stroke="rgba(255,255,255,.08)" strokeWidth="10" strokeLinecap="round"/>{pct>0&&<path d={`M${s.x},${s.y} A${r},${r} 0 ${lv?1:0} 1 ${v.x},${v.y}`} fill="none" stroke={color} strokeWidth="10" strokeLinecap="round" style={{filter:`drop-shadow(0 0 5px ${color}90)`}}/>}<text x={cx} y={cy+11} textAnchor="middle" fill="#fff" fontSize="19" fontWeight="700">{Math.round(value)}{max===100?'%':''}</text></svg>{label&&<div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginTop:1}}>{label}</div>}</div>);
+}
+
+
+
+/* ═══ FY ANNUAL BAND ═════════════════════════════════════════ */
+function FYBand({kpiId,actual,getTarget,color='#00B4D8'}){
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget(kpiId,p),0);
+  const pct=safePct(actual,fyTarget);
+  const elapsed=Math.max(ELAPSED_MONTHS,1);
+  const forecast=Math.round((actual/elapsed)*12);
+  const forecastPct=safePct(forecast,fyTarget);
+  const health=pct>=100?'#4ade80':pct>=75?'#FFD700':pct>=50?'#fb923c':'#f87171';
+  if(fyTarget===0)return null;
+  return(
+    <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:14,background:'rgba(255,255,255,.04)',borderRadius:12,padding:'12px 16px',border:`1px solid ${color}25`}}>
+      {[
+        ['FY Target',fyTarget,color],
+        ['YTD Achievement',actual,health],
+        [`Achievement (${ELAPSED_MONTHS}/${12} mo)`,`${pct}%`,health],
+        ['Year-End Forecast',forecast,forecastPct>=100?'#4ade80':forecastPct>=75?'#FFD700':'#f87171'],
+      ].map(([l,v,c])=>(
+        <div key={l} style={{textAlign:'center'}}>
+          <div style={{fontSize:20,fontWeight:800,color:c,lineHeight:1}}>{v}</div>
+          <div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginTop:3}}>{l}</div>
+        </div>
+      ))}
+      <div style={{gridColumn:'1/-1',marginTop:6}}>
+        <div style={{height:5,borderRadius:3,background:'rgba(255,255,255,.08)'}}>
+          <div style={{width:`${Math.min(pct,100)}%`,height:'100%',borderRadius:3,background:health,transition:'width .4s'}}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ TARGET SETTER MODAL ════════════════════════════════════ */
+function TargetSetter({kpiId,kpiLabel,setMonthlyTarget,getTarget,perms,showToast}){
+  const[open,setOpen]=useState(false);
+  const[targets,setTargets]=useState(()=>MONTHS.reduce((a,{p})=>({...a,[p]:getTarget(kpiId,p)||''}),{}));
+  if(!perms?.canAdd)return null;
+  const save=async()=>{
+    const entries=Object.entries(targets);
+    for(const[month,val]of entries){if(val!=='')await setMonthlyTarget(kpiId,month,+val);}
+    showToast('Targets saved successfully');setOpen(false);
+  };
+  const fill=()=>{const first=Object.values(targets).find(v=>v!=='');if(!first)return;setTargets(MONTHS.reduce((a,{p})=>({...a,[p]:first}),{}));};
+  return(<>
+    <button onClick={()=>{setTargets(MONTHS.reduce((a,{p})=>({...a,[p]:getTarget(kpiId,p)||''}),{}));setOpen(true);}} style={{...css.btnSm,color:'#FFD700',border:'1px solid rgba(255,215,0,.3)',background:'rgba(255,215,0,.08)',display:'flex',alignItems:'center',gap:4,fontSize:11}}>🎯 Set Targets</button>
+    <Modal open={open} onClose={()=>setOpen(false)} title={`Set Monthly Targets — ${kpiLabel}`} wide>
+      <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:12}}>Enter count targets for each month of {FY_LABEL}. Leave blank to keep existing.</div>
+      <div style={{display:'flex',gap:8,marginBottom:12}}>
+        <button onClick={fill} style={{...css.btnSm,fontSize:11}}>↔ Apply first value to all months</button>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10,marginBottom:16}}>
+        {MONTHS.map(({m,p})=>(
+          <div key={p}>
+            <div style={{fontSize:10,fontWeight:700,color:'rgba(255,255,255,.45)',marginBottom:4}}>{m}</div>
+            <input type="number" min="0" value={targets[p]} onChange={e=>setTargets(t=>({...t,[p]:e.target.value}))} placeholder="—" style={{...css.inp,textAlign:'center',fontSize:14,fontWeight:700}}/>
+          </div>
+        ))}
+      </div>
+      <div style={{display:'flex',gap:10}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={save} style={{...css.btnP,flex:1}}>💾 Save All Targets</button></div>
+    </Modal>
+  </>);
+}
+
+/* ═══ AI INSIGHTS PANEL ══════════════════════════════════════ */
+function AIInsights({kpiLabel,kpiId,monthlyData,fyTarget,actual,forecast,perms}){
+  const[open,setOpen]=useState(false);
+  const[analysis,setAnalysis]=useState(null);
+  const[loading,setLoading]=useState(false);
+
+  const runAnalysis=async()=>{
+    setLoading(true);setAnalysis(null);
+    const monthSummary=monthlyData.map(d=>`${d.month}: actual=${d.actual||d.count||0}, target=${d.target||0}`).join(' | ');
+    const prompt=`You are a KPI analytics expert for AIS Windows Channel Management team. Analyze this KPI data and give a sharp, actionable brief:
+
+KPI: ${kpiLabel} (${FY_LABEL})
+FY Target: ${fyTarget} | YTD Achievement: ${actual} | Year-End Forecast: ${forecast}
+Monthly data: ${monthSummary}
+
+Provide analysis in exactly this JSON format (no markdown, no backticks):
+{"health":"Good|Warning|Critical","summary":"2 sentence executive summary","goingWell":["point1","point2"],"needsImprovement":["point1","point2"],"actions":["action1","action2","action3"],"forecast":"1 sentence forecast statement"}`;
+
+    try{
+      const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:prompt}]})});
+      const data=await res.json();
+      const text=data.content?.map(c=>c.text||'').join('');
+      const clean=text.replace(/```json|```/g,'').trim();
+      setAnalysis(JSON.parse(clean));
+    }catch(e){setAnalysis({health:'Warning',summary:'Unable to fetch AI analysis. Please check your connection.',goingWell:[],needsImprovement:[],actions:['Retry the analysis'],forecast:'Data unavailable.'});}
+    setLoading(false);
+  };
+
+  const hc={Good:'#4ade80',Warning:'#FFD700',Critical:'#f87171'};
+  return(<>
+    <button onClick={()=>{setOpen(true);if(!analysis)runAnalysis();}} style={{...css.btnSm,color:'#a78bfa',border:'1px solid rgba(167,139,250,.3)',background:'rgba(167,139,250,.08)',display:'flex',alignItems:'center',gap:4,fontSize:11}}>✨ AI Insights</button>
+    <Modal open={open} onClose={()=>setOpen(false)} title={`✨ AI Insights — ${kpiLabel}`} wide>
+      {loading&&<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,gap:12}}><Spinner size={32} color="#a78bfa"/><div style={{fontSize:13,color:'rgba(255,255,255,.5)'}}>Claude is analysing your KPI data…</div></div>}
+      {!loading&&analysis&&(<div style={{display:'flex',flexDirection:'column',gap:14}}>
+        <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderRadius:10,background:`${hc[analysis.health]||'#FFD700'}12`,border:`1px solid ${hc[analysis.health]||'#FFD700'}30`}}>
+          <span style={{fontSize:20}}>{analysis.health==='Good'?'🟢':analysis.health==='Critical'?'🔴':'🟡'}</span>
+          <div><div style={{fontSize:12,fontWeight:700,color:hc[analysis.health]||'#FFD700'}}>{analysis.health} — KPI Status</div><div style={{fontSize:12,color:'rgba(255,255,255,.7)',marginTop:2}}>{analysis.summary}</div></div>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+          <div style={{borderRadius:10,padding:'12px 14px',background:'rgba(74,222,128,.07)',border:'1px solid rgba(74,222,128,.2)'}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#4ade80',marginBottom:8}}>✅ What's Going Well</div>
+            {(analysis.goingWell||[]).map((p,i)=><div key={i} style={{fontSize:12,color:'rgba(255,255,255,.75)',marginBottom:5,display:'flex',gap:6}}><span style={{color:'#4ade80',flexShrink:0}}>•</span>{p}</div>)}
+            {!analysis.goingWell?.length&&<div style={{fontSize:11,color:'rgba(255,255,255,.3)'}}>No data</div>}
+          </div>
+          <div style={{borderRadius:10,padding:'12px 14px',background:'rgba(251,146,60,.07)',border:'1px solid rgba(251,146,60,.2)'}}>
+            <div style={{fontSize:11,fontWeight:700,color:'#fb923c',marginBottom:8}}>⚠ Needs Improvement</div>
+            {(analysis.needsImprovement||[]).map((p,i)=><div key={i} style={{fontSize:12,color:'rgba(255,255,255,.75)',marginBottom:5,display:'flex',gap:6}}><span style={{color:'#fb923c',flexShrink:0}}>•</span>{p}</div>)}
+            {!analysis.needsImprovement?.length&&<div style={{fontSize:11,color:'rgba(255,255,255,.3)'}}>No issues found</div>}
+          </div>
+        </div>
+        <div style={{borderRadius:10,padding:'12px 14px',background:'rgba(167,139,250,.07)',border:'1px solid rgba(167,139,250,.25)'}}>
+          <div style={{fontSize:11,fontWeight:700,color:'#a78bfa',marginBottom:8}}>🎯 Recommended Actions</div>
+          {(analysis.actions||[]).map((a,i)=><div key={i} style={{fontSize:12,color:'rgba(255,255,255,.8)',marginBottom:6,display:'flex',gap:8,alignItems:'flex-start'}}><span style={{color:'#a78bfa',fontWeight:700,flexShrink:0}}>{i+1}.</span>{a}</div>)}
+        </div>
+        <div style={{borderRadius:10,padding:'10px 14px',background:'rgba(0,180,216,.07)',border:'1px solid rgba(0,180,216,.2)'}}>
+          <div style={{fontSize:11,fontWeight:700,color:'#00B4D8',marginBottom:4}}>📈 Forecast</div>
+          <div style={{fontSize:12,color:'rgba(255,255,255,.75)'}}>{analysis.forecast}</div>
+        </div>
+        <div style={{display:'flex',gap:10}}><button onClick={runAnalysis} style={{...css.btnSm,flex:1}}>🔄 Refresh Analysis</button><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Close</button></div>
+      </div>)}
+      {!loading&&!analysis&&<div style={{textAlign:'center',padding:30,color:'rgba(255,255,255,.4)'}}>Click Refresh to load AI analysis</div>}
+    </Modal>
+  </>);
 }
 
 /* ═══ UI PRIMITIVES ══════════════════════════════════════════ */
@@ -576,7 +723,7 @@ function Modal({open,onClose,title,children,wide}){
   return<div role="dialog" aria-modal="true" onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.72)',backdropFilter:'blur(4px)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}><div style={{...css.glassMd,borderRadius:18,width:'100%',maxWidth:wide?740:540,maxHeight:'90vh',overflowY:'auto',boxShadow:'0 30px 100px rgba(0,0,0,.6)'}}><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 20px',borderBottom:'1px solid rgba(255,255,255,.08)'}}><span style={{fontWeight:700,fontSize:15,color:'#fff'}}>{title}</span><button onClick={onClose} style={{...css.btnG,padding:'4px 10px',fontSize:16,lineHeight:1}}>✕</button></div><div style={{padding:20}}>{children}</div></div></div>;
 }
 
-function KPICard({title,desc,metrics,onAdd,perms,children,kpiId,kpiHealth}){
+function KPICard({title,desc,metrics,onAdd,perms,children,kpiId,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,kpiLabel,monthlyData,fyTarget,actual,forecast,showToast}){
   const[collapsed,setCollapsed]=useState(false);
   const severity=kpiId?kpiHealth?.[kpiId]:null;
   const isCritical=severity==='Critical';
@@ -817,7 +964,7 @@ function ExecutiveCommandCenter({collections,getFiltered,setActiveKPI,kpiHealth}
     {/* Banner */}
     <div style={{borderRadius:18,padding:'16px 20px',background:'linear-gradient(135deg,rgba(248,113,113,.15),rgba(251,146,60,.08))',border:'1px solid rgba(248,113,113,.3)',display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:12,alignItems:'center'}}>
       <div>
-        <div style={{fontSize:11,fontWeight:700,color:'#f87171',marginBottom:4}}>⚡ OPERATIONAL COMMAND CENTER — Q4 2025</div>
+        <div style={{fontSize:11,fontWeight:700,color:'#f87171',marginBottom:4}}>⚡ OPERATIONAL COMMAND CENTER — {FY_LABEL}</div>
         <div style={{fontSize:20,fontWeight:800,color:'#fff'}}>Executive Summary Dashboard</div>
         <div style={{fontSize:12,color:'rgba(255,255,255,.5)',marginTop:3}}>{critActions.length} critical · {openActions.length} open actions · {overdueTasks.length} overdue tasks</div>
       </div>
@@ -1326,11 +1473,11 @@ function ReportsEngine({collections,getFiltered}){
 
 
 /* ═══ OVERVIEW ══════════════════════════════════════════════ */
-function Overview({getFiltered,setActiveKPI,kpiHealth}){
-  const f=getFiltered('ch_prospect_funnel'),sl=getFiltered('ch_shortlisted'),
-    cft=getFiltered('ch_prospect_cft'),p=getFiltered('ch_partner_addition'),
-    s=getFiltered('ch_showroom_addition'),aud=getFiltered('ch_showroom_audit'),
-    crm=getFiltered('ch_crm_recovery'),cad=getFiltered('ch_cad_tat'),rnr=getFiltered('ch_rnr');
+function Overview({collections,setActiveKPI,kpiHealth,getTarget}){
+  const f=getCol(collections,'ch_prospect_funnel'),sl=getCol(collections,'ch_shortlisted'),
+    cft=getCol(collections,'ch_prospect_cft'),p=getCol(collections,'ch_partner_addition'),
+    s=getCol(collections,'ch_showroom_addition'),aud=getCol(collections,'ch_showroom_audit'),
+    crm=getCol(collections,'ch_crm_recovery'),cad=getCol(collections,'ch_cad_tat'),rnr=getCol(collections,'ch_rnr');
   const conv=f.filter(d=>d.status==='Converted').length,actP=p.filter(d=>d.status==='Active').length,openS=s.filter(d=>d.status==='Opened').length;
   const avgAud=avgOf(aud,'score'),cadDel=cad.filter(d=>d.tat!=null);
   const avgTAT=cadDel.length?(cadDel.reduce((s,d)=>s+(+d.tat||0),0)/cadDel.length).toFixed(1):0;
@@ -1395,20 +1542,24 @@ function Overview({getFiltered,setActiveKPI,kpiHealth}){
 
 
 /* ═══ KPI 1-9 ════════════════════════════════════════════════ */
-function KPI1({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI1({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_prospect_funnel');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({date:'',prospectName:'',company:'',zone:'',source:'',status:STATUS_PROSPECT[0],channelLead:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,prospectName:'',company:'',zone:'',source:'',status:STATUS_PROSPECT[0],channelLead:''});
   const conv=data.filter(d=>d.status==='Converted').length;
   const bySrc=LEAD_SOURCES.map(s=>({source:s,count:data.filter(d=>d.source===s).length}));
-  const cols=[{key:'date',label:'Date'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'source',label:'Source'},{key:'status',label:'Status',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
-  const add=async()=>{if(!chkForm(form,[['date','Date required'],['prospectName','Name required'],['channelLead','Channel lead required']],showToast))return;setSaving(true);await addRecord('ch_prospect_funnel',form,{trigger:'survey_low'});showToast('Prospect added');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title="KPI 01 · Partner Prospect Funnel" desc="Track prospects showing interest in channel partnership" metrics={[{value:data.length,label:'Total Prospects'},{value:conv,label:'Converted',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi1" kpiHealth={kpiHealth}>
-    <G2 left={<><SL text="Activation Funnel"/>{[['Interested',data.length,'#00B4D8'],['Follow-up',data.filter(d=>d.status==='Follow-up').length,'#FFD700'],['Converted',conv,'#4ade80']].map(([n,v,c])=><div key={n} style={{marginBottom:9}}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:'rgba(255,255,255,.6)'}}>{n}</span><span style={{color:c,fontWeight:700}}>{v}</span></div><div style={{height:24,borderRadius:7,background:`${c}14`,border:`1px solid ${c}28`,width:`${Math.max(data.length?(v/data.length)*100:12,12)}%`,minWidth:70,display:'flex',alignItems:'center',paddingLeft:9}}><span style={{fontSize:11,color:c,fontWeight:700}}>{data.length?Math.round((v/data.length)*100):0}%</span></div></div>)}</>}
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi1',p)}));
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi1',p),0);
+  const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
+  const cols=[{key:'month',label:'Month'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'source',label:'Source'},{key:'status',label:'Status',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['prospectName','Name required'],['channelLead','Channel lead required']],showToast))return;setSaving(true);await addRecord('ch_prospect_funnel',form);showToast('Prospect added');reset();setOpen(false);setSaving(false);};
+  return(<KPICard title="KPI 01 · Partner Prospect Funnel" desc="Track prospects showing interest in channel partnership" metrics={[{value:data.length,label:'Total Prospects'},{value:conv,label:'Converted',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi1" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
+    <FYBand kpiId="kpi1" actual={data.length} getTarget={getTarget} color="#00B4D8"/>
+    <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#00B4D8','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="By Lead Source"/><BarChartSVG data={bySrc} bars={[{key:'count',label:'Count'}]} xKey="source" colors={['#00B4D8']} height={165}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_prospect_funnel',id)} onEdit={(id, updated) => updateRecord('ch_prospect_funnel', id, updated)}  perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add Prospect to Funnel">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Prospect Name" required><input value={form.prospectName} onChange={e=>set('prospectName',e.target.value)} style={css.inp}/></FF>
         <FF label="Company"><input value={form.company} onChange={e=>set('company',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select zone'},...ZONES]}/></FF>
@@ -1421,19 +1572,21 @@ function KPI1({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,k
   </KPICard>);
 }
 
-function KPI2({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI2({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_shortlisted');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({date:'',prospectName:'',company:'',zone:'',shortlistDate:'',status:'Active',channelLead:''});
-  const monthly=MONTHS.map(({m,p})=>({month:m,shortlisted:data.filter(d=>d.date?.startsWith(p)).length,target:KPI_CONFIG.shortlistMonthly.target}));
-  const cols=[{key:'date',label:'Date'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'shortlistDate',label:'Shortlist Date'},{key:'status',label:'Status',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
-  const add=async()=>{if(!chkForm(form,[['date','Date required'],['prospectName','Name required'],['channelLead','Channel lead required']],showToast))return;setSaving(true);await addRecord('ch_shortlisted',form);showToast('Prospect shortlisted');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title="KPI 02 · Prospect Shortlisting" desc="Track prospects shortlisted for channel partnership evaluation" metrics={[{value:data.length,label:'Total'},{value:data.filter(d=>d.status==='Active').length,label:'Active',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi2" kpiHealth={kpiHealth}>
-    <SL text={`Monthly vs Target (${KPI_CONFIG.shortlistMonthly.target}/month)`}/>
-    <BarChartSVG data={monthly} bars={[{key:'shortlisted',label:'Shortlisted'},{key:'target',label:'Target'}]} colors={['#00B4D8','rgba(255,255,255,.12)']} height={165}/>
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,prospectName:'',company:'',zone:'',status:'Active',channelLead:''});
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi2',p)}));
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi2',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
+  const cols=[{key:'month',label:'Month'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'status',label:'Status',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['prospectName','Name required'],['channelLead','Channel lead required']],showToast))return;setSaving(true);await addRecord('ch_shortlisted',form);showToast('Prospect shortlisted');reset();setOpen(false);setSaving(false);};
+  return(<KPICard title="KPI 02 · Prospect Shortlisting" desc="Track prospects shortlisted for channel partnership evaluation" metrics={[{value:data.length,label:'Total'},{value:data.filter(d=>d.status==='Active').length,label:'Active',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi2" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
+    <FYBand kpiId="kpi2" actual={data.length} getTarget={getTarget} color="#00B4D8"/>
+    <SL text={`Monthly vs Target (${FY_LABEL})`}/>
+    <BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#00B4D8','rgba(255,255,255,.12)']} height={165}/>
     <div style={{marginTop:16}}><DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_shortlisted',id)} onEdit={(id, updated) => updateRecord('ch_shortlisted', id, updated)} perms={perms}/></div>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add Shortlisted Prospect">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Prospect Name" required><input value={form.prospectName} onChange={e=>set('prospectName',e.target.value)} style={css.inp}/></FF>
         <FF label="Company"><input value={form.company} onChange={e=>set('company',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
@@ -1446,20 +1599,22 @@ function KPI2({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,k
   </KPICard>);
 }
 
-function KPI3({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI3({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_prospect_cft');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({date:'',prospectName:'',company:'',zone:'',cftDate:'',result:'Pass',channelLead:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,prospectName:'',company:'',zone:'',result:'Pass',channelLead:''});
   const passed=data.filter(d=>d.result==='Pass').length,passRate=safePct(passed,data.length);
-  const cumul=MONTHS.map(({m,p})=>{const up=data.filter(d=>(d.cftDate||d.date)<=p+'-31');return{month:m,total:up.length,pass:up.filter(d=>d.result==='Pass').length};});
-  const cols=[{key:'date',label:'Date'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'cftDate',label:'CFT Date'},{key:'result',label:'Result',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
-  const add=async()=>{if(!chkForm(form,[['date','Date required'],['prospectName','Name required'],['channelLead','Lead required']],showToast))return;setSaving(true);await addRecord('ch_prospect_cft',form,{trigger:form.result==='Fail'?'cft_fail':undefined});showToast('CFT clearance recorded');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title="KPI 03 · Partner CFT Clearance" desc="Track Channel Partner Field Test clearances" metrics={[{value:data.length,label:'Total CFTs'},{value:`${passRate}%`,label:'Pass Rate',color:passRate>=KPI_CONFIG.cftPassRate.target?'#4ade80':'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi3" kpiHealth={kpiHealth}>
-    <G2 left={<><SL text="Cumulative CFT Trend"/><AreaChartSVG data={cumul} areas={[{key:'total',label:'Total'},{key:'pass',label:'Cleared',dash:true}]} colors={['#00B4D8','#4ade80']} height={165}/></>}
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7)||d.cftDate?.slice(0,7))===p).length,target:getTarget('kpi3',p)}));
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi3',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
+  const cols=[{key:'month',label:'Month'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'result',label:'Result',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['prospectName','Name required'],['channelLead','Lead required']],showToast))return;setSaving(true);await addRecord('ch_prospect_cft',form,{trigger:form.result==='Fail'?'cft_fail':undefined});showToast('CFT clearance recorded');reset();setOpen(false);setSaving(false);};
+  return(<KPICard title="KPI 03 · Partner CFT Clearance" desc="Track Channel Partner Field Test clearances" metrics={[{value:data.length,label:'Total CFTs'},{value:`${passRate}%`,label:'Pass Rate',color:passRate>=KPI_CONFIG.cftPassRate.target?'#4ade80':'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi3" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
+    <FYBand kpiId="kpi3" actual={data.length} getTarget={getTarget} color="#4ade80"/>
+    <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#4ade80','rgba(255,255,255,.12)']} height={165}/></>}
       right={<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%'}}><Gauge value={passRate} label={`Pass Rate (target ${KPI_CONFIG.cftPassRate.target}%)`} color={passRate>=KPI_CONFIG.cftPassRate.target?'#4ade80':'#FFD700'} size={150}/><div style={{display:'flex',gap:20,marginTop:10}}>{[[passed,'#4ade80','Cleared'],[data.length-passed,'#f87171','Not Cleared']].map(([v,c,l])=><div key={l} style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div><div style={{fontSize:10,color:'rgba(255,255,255,.4)'}}>{l}</div></div>)}</div></div>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_prospect_cft',id)} onEdit={(id, updated) => updateRecord('ch_prospect_cft', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add CFT Clearance Record">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Prospect Name" required><input value={form.prospectName} onChange={e=>set('prospectName',e.target.value)} style={css.inp}/></FF>
         <FF label="Company"><input value={form.company} onChange={e=>set('company',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
@@ -1472,26 +1627,27 @@ function KPI3({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,k
   </KPICard>);
 }
 
-function KPI4({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI4({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_partner_addition');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({date:'',partnerName:'',zone:'',partnerType:'Dealer',onboardingDate:'',status:'Active',channelLead:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,partnerName:'',zone:'',partnerType:'Dealer',status:'Active',channelLead:''});
   const active=data.filter(d=>d.status==='Active').length;
-  const monthly=MONTHS.map(({m,p})=>({month:m,onboarded:data.filter(d=>(d.onboardingDate||d.date)?.startsWith(p)).length,target:KPI_CONFIG.partnerMonthly.target}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.onboardingDate?.slice(0,7)||d.date?.slice(0,7))===p).length,target:getTarget('kpi4',p)}));
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi4',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
   const byType=PARTNER_TYPES.map((t,i)=>({name:t,value:data.filter(d=>d.partnerType===t).length,color:['#00B4D8','#FFD700','#a78bfa'][i]}));
   const byZone=ZONES.map(z=>({zone:z,count:data.filter(d=>d.zone===z).length})).filter(z=>z.count>0);
-  const cols=[{key:'date',label:'Date'},{key:'partnerName',label:'Partner'},{key:'zone',label:'Zone'},{key:'partnerType',label:'Type'},{key:'onboardingDate',label:'Onboarding'},{key:'status',label:'Status',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
-  const add=async()=>{if(!chkForm(form,[['date','Date required'],['partnerName','Partner name required'],['channelLead','Lead required']],showToast))return;setSaving(true);await addRecord('ch_partner_addition',form,{trigger:'partner_onboarded'});showToast('Partner onboarded — survey reminder created');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title="KPI 04 · Partner Onboarding" desc="Track new channel partners onboarded across India" metrics={[{value:data.length,label:'Total Onboarded'},{value:active,label:'Active',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi4" kpiHealth={kpiHealth}>
-    <G2 left={<><SL text={`Monthly vs Target (${KPI_CONFIG.partnerMonthly.target}/month)`}/><BarChartSVG data={monthly} bars={[{key:'onboarded',label:'Onboarded'},{key:'target',label:'Target'}]} colors={['#4ade80','rgba(255,255,255,.12)']} height={165}/></>}
+  const cols=[{key:'month',label:'Month'},{key:'partnerName',label:'Partner'},{key:'zone',label:'Zone'},{key:'partnerType',label:'Type'},{key:'status',label:'Status',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['partnerName','Partner name required'],['channelLead','Lead required']],showToast))return;setSaving(true);await addRecord('ch_partner_addition',form,{trigger:'partner_onboarded'});showToast('Partner onboarded — survey reminder created');reset();setOpen(false);setSaving(false);};
+  return(<KPICard title="KPI 04 · Partner Onboarding" desc="Track new channel partners onboarded across India" metrics={[{value:data.length,label:'Total Onboarded'},{value:active,label:'Active',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi4" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
+    <FYBand kpiId="kpi4" actual={data.length} getTarget={getTarget} color="#4ade80"/>
+    <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#4ade80','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="Partner Type Mix"/><div style={{display:'flex',flexDirection:'column',gap:9,marginBottom:12}}>{byType.map(t=><div key={t.name}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:'rgba(255,255,255,.6)'}}>{t.name}</span><b style={{color:'#fff'}}>{t.value}</b></div><div style={{height:6,borderRadius:3,background:'rgba(255,255,255,.06)'}}><div style={{width:`${data.length?(t.value/data.length)*100:0}%`,height:'100%',borderRadius:3,background:t.color}}/></div></div>)}</div><SL text="By Zone"/><DonutChartSVG data={byZone} labelKey="zone" valueKey="count" colors={ZONES.map(z=>ZONE_COLORS[z])} height={130}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_partner_addition',id)} onEdit={(id, updated) => updateRecord('ch_partner_addition', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add Channel Partner">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Partner Name" required><input value={form.partnerName} onChange={e=>set('partnerName',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
         <FF label="Partner Type"><Sel value={form.partnerType} onChange={v=>set('partnerType',v)} opts={PARTNER_TYPES}/></FF>
-        <FF label="Onboarding Date"><input type="date" value={form.onboardingDate} onChange={e=>set('onboardingDate',e.target.value)} style={css.inp}/></FF>
         <FF label="Status"><Sel value={form.status} onChange={v=>set('status',v)} opts={STATUS_PARTNER}/></FF>
         <FF label="Channel Lead" required><TeamSel value={form.channelLead} onChange={v=>set('channelLead',v)}/></FF>
       </div>
@@ -1500,25 +1656,26 @@ function KPI4({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,k
   </KPICard>);
 }
 
-function KPI5({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI5({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_showroom_cad');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({date:'',showroomName:'',zone:'',cadType:'Full Layout',completionDate:'',designerName:'',status:'Completed'});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,showroomName:'',zone:'',cadType:'Full Layout',designerName:'',status:'Completed'});
   const completed=data.filter(d=>d.status==='Completed').length;
-  const cumul=MONTHS.map(({m,p})=>({month:m,completed:data.filter(d=>d.date<=p+'-31'&&d.status==='Completed').length}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi5',p)}));
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi5',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
   const byType=CAD_TYPES.map((t,i)=>({type:t,count:data.filter(d=>d.cadType===t).length,color:['#a78bfa','#00B4D8','#FFD700'][i]}));
-  const cols=[{key:'date',label:'Date'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'cadType',label:'CAD Type'},{key:'completionDate',label:'Completed'},{key:'designerName',label:'Designer'},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
-  const add=async()=>{if(!chkForm(form,[['date','Date required'],['showroomName','Showroom required']],showToast))return;setSaving(true);await addRecord('ch_showroom_cad',form);showToast('CAD record added');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title="KPI 05 · Showroom CAD Completion" desc="Track CAD designs completed for channel partner showrooms" metrics={[{value:data.length,label:'Total CADs'},{value:`${safePct(completed,data.length)}%`,label:'Completion',color:'#a78bfa'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi5" kpiHealth={kpiHealth}>
-    <G2 left={<><SL text="Cumulative Completion"/><AreaChartSVG data={cumul} areas={[{key:'completed',label:'Completed'}]} colors={['#a78bfa']} height={165}/></>}
+  const cols=[{key:'month',label:'Month'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'cadType',label:'CAD Type'},{key:'designerName',label:'Designer'},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['showroomName','Showroom required']],showToast))return;setSaving(true);await addRecord('ch_showroom_cad',form);showToast('CAD record added');reset();setOpen(false);setSaving(false);};
+  return(<KPICard title="KPI 05 · Showroom CAD Completion" desc="Track CAD designs completed for channel partner showrooms" metrics={[{value:data.length,label:'Total CADs'},{value:`${safePct(completed,data.length)}%`,label:'Completion',color:'#a78bfa'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi5" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
+    <FYBand kpiId="kpi5" actual={data.length} getTarget={getTarget} color="#a78bfa"/>
+    <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#a78bfa','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="By CAD Type"/><div style={{display:'flex',flexDirection:'column',gap:9,marginBottom:14}}>{byType.map(t=><div key={t.type}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:'rgba(255,255,255,.6)'}}>{t.type}</span><b style={{color:'#fff'}}>{t.count}</b></div><div style={{height:6,borderRadius:3,background:'rgba(255,255,255,.06)'}}><div style={{width:`${data.length?(t.count/data.length)*100:0}%`,height:'100%',borderRadius:3,background:t.color}}/></div></div>)}</div><Gauge value={safePct(completed,data.length)} label="Completion %" color="#a78bfa" size={130}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_cad',id)} onEdit={(id, updated) => updateRecord('ch_showroom_cad', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add CAD Record">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Showroom Name" required><input value={form.showroomName} onChange={e=>set('showroomName',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
         <FF label="CAD Type"><Sel value={form.cadType} onChange={v=>set('cadType',v)} opts={CAD_TYPES}/></FF>
-        <FF label="Completion Date"><input type="date" value={form.completionDate} onChange={e=>set('completionDate',e.target.value)} style={css.inp}/></FF>
         <FF label="Designer"><TeamSel value={form.designerName} onChange={v=>set('designerName',v)}/></FF>
         <FF label="Status"><Sel value={form.status} onChange={v=>set('status',v)} opts={STATUS_CAD}/></FF>
       </div>
@@ -1527,25 +1684,26 @@ function KPI5({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,k
   </KPICard>);
 }
 
-function KPI6({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI6({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_showroom_addition');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({date:'',showroomName:'',zone:'',location:'',showroomType:'A',openingDate:'',status:'Opened'});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,showroomName:'',zone:'',location:'',showroomType:'A',status:'Opened'});
   const opened=data.filter(d=>d.status==='Opened').length;
-  const monthly=MONTHS.map(({m,p})=>({month:m,launched:data.filter(d=>(d.openingDate||d.date)?.startsWith(p)).length,target:KPI_CONFIG.showroomMonthly.target}));
-  const cols=[{key:'date',label:'Date'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'location',label:'Location'},{key:'showroomType',label:'Grade',render:v=><span style={{color:'#FFD700',fontWeight:700}}>{v}</span>},{key:'openingDate',label:'Launch Date'},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
-  const add=async()=>{if(!chkForm(form,[['date','Date required'],['showroomName','Showroom name required']],showToast))return;setSaving(true);await addRecord('ch_showroom_addition',form,{trigger:'showroom_opened'});showToast('Showroom launch recorded — audit reminder created');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title="KPI 06 · Showroom Launch" desc="Track new partner showrooms commissioned across India" metrics={[{value:data.length,label:'Total'},{value:opened,label:'Launched',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi6" kpiHealth={kpiHealth}>
-    <G2 left={<><SL text={`Monthly vs Target (${KPI_CONFIG.showroomMonthly.target}/month)`}/><BarChartSVG data={monthly} bars={[{key:'launched',label:'Launched'},{key:'target',label:'Target'}]} colors={['#FFD700','rgba(255,255,255,.12)']} height={165}/></>}
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.openingDate?.slice(0,7)||d.date?.slice(0,7))===p).length,target:getTarget('kpi6',p)}));
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi6',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
+  const cols=[{key:'month',label:'Month'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'location',label:'Location'},{key:'showroomType',label:'Grade',render:v=><span style={{color:'#FFD700',fontWeight:700}}>{v}</span>},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['showroomName','Showroom name required']],showToast))return;setSaving(true);await addRecord('ch_showroom_addition',form,{trigger:'showroom_opened'});showToast('Showroom launch recorded — audit reminder created');reset();setOpen(false);setSaving(false);};
+  return(<KPICard title="KPI 06 · Showroom Launch" desc="Track new partner showrooms commissioned across India" metrics={[{value:data.length,label:'Total'},{value:opened,label:'Launched',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi6" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
+    <FYBand kpiId="kpi6" actual={data.length} getTarget={getTarget} color="#FFD700"/>
+    <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#FFD700','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="By Grade"/><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9}}>{SHOWROOM_GRADES.map((g,i)=><div key={g} style={{borderRadius:11,padding:'11px',textAlign:'center',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.07)'}}><div style={{fontSize:22,fontWeight:800,color:['#FFD700','#00B4D8','#a78bfa','#fb923c'][i],lineHeight:1}}>{data.filter(d=>d.showroomType===g).length}</div><div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginTop:3}}>Grade {g}</div></div>)}</div></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_addition',id)} onEdit={(id, updated) => updateRecord('ch_showroom_addition', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Record Showroom Launch">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Showroom Name" required><input value={form.showroomName} onChange={e=>set('showroomName',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
         <FF label="Location"><input value={form.location} onChange={e=>set('location',e.target.value)} style={css.inp}/></FF>
         <FF label="Grade"><Sel value={form.showroomType} onChange={v=>set('showroomType',v)} opts={SHOWROOM_GRADES}/></FF>
-        <FF label="Launch Date"><input type="date" value={form.openingDate} onChange={e=>set('openingDate',e.target.value)} style={css.inp}/></FF>
         <FF label="Status"><Sel value={form.status} onChange={v=>set('status',v)} opts={STATUS_SHOWROOM_OP}/></FF>
       </div>
       <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Add Showroom</button></div>
@@ -1553,20 +1711,21 @@ function KPI6({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,k
   </KPICard>);
 }
 
-function KPI7({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI7({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_partner_survey');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({date:'',partnerName:'',zone:'',surveyType:'Monthly',score:'',remarks:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,partnerName:'',zone:'',surveyType:'Monthly',score:'',remarks:''});
   const avg=avgOf(data,'score');
-  const monthly=MONTHS.map(({m,p})=>({month:m,surveys:data.filter(d=>d.date?.startsWith(p)).length,target:KPI_CONFIG.surveyMonthly.target}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi7',p)}));
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi7',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
   const radar=[{subject:'Support',value:Math.round(avg*1.02)},{subject:'Price',value:Math.round(avg*.96)},{subject:'Delivery',value:Math.round(avg*1.01)},{subject:'Quality',value:Math.round(avg*.99)},{subject:'Comms',value:Math.round(avg*.97)}];
-  const cols=[{key:'date',label:'Date'},{key:'partnerName',label:'Partner'},{key:'zone',label:'Zone'},{key:'surveyType',label:'Type'},{key:'score',label:'NPS Score',render:v=><span style={{fontWeight:700,color:+v>=85?'#4ade80':+v>=70?'#FFD700':'#f87171'}}>{v}/100</span>},{key:'remarks',label:'Remarks'}];
-  const add=async()=>{if(!chkForm(form,[['date','Date required'],['partnerName','Partner required'],['score','Score required',isScore]],showToast))return;setSaving(true);await addRecord('ch_partner_survey',{...form,score:+form.score},{trigger:'survey_low'});showToast('Survey recorded');reset();setOpen(false);setSaving(false);};
+  const cols=[{key:'month',label:'Month'},{key:'partnerName',label:'Partner'},{key:'zone',label:'Zone'},{key:'surveyType',label:'Type'},{key:'score',label:'NPS Score',render:v=><span style={{fontWeight:700,color:+v>=85?'#4ade80':+v>=70?'#FFD700':'#f87171'}}>{v}/100</span>},{key:'remarks',label:'Remarks'}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['partnerName','Partner required'],['score','Score required',isScore]],showToast))return;setSaving(true);await addRecord('ch_partner_survey',{...form,score:+form.score},{trigger:'survey_low'});showToast('Survey recorded');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 07 · Partner NPS Survey" desc="Track partner satisfaction Net Promoter Scores" metrics={[{value:data.length,label:'Surveys'},{value:avg,label:'Avg NPS',color:'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi7" kpiHealth={kpiHealth}>
     <G2 left={<><SL text="Monthly Surveys vs Target"/><BarChartSVG data={monthly} bars={[{key:'surveys',label:'Surveys'},{key:'target',label:'Target'}]} colors={['#f472b6','rgba(255,255,255,.12)']} height={165}/></>} right={<><SL text="Parameter Radar"/><RadarChartSVG data={radar} color="#f472b6" height={210}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_partner_survey',id)} onEdit={(id, updated) => updateRecord('ch_partner_survey', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add Partner NPS Survey">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Partner Name" required><input value={form.partnerName} onChange={e=>set('partnerName',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
         <FF label="Survey Type"><Sel value={form.surveyType} onChange={v=>set('surveyType',v)} opts={SURVEY_TYPES}/></FF>
@@ -1578,20 +1737,21 @@ function KPI7({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,k
   </KPICard>);
 }
 
-function KPI8({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI8({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_showroom_audit');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({date:'',showroomName:'',zone:'',auditorName:'',auditType:'A',score:'',remarks:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,showroomName:'',zone:'',auditorName:'',auditType:'A',score:'',remarks:''});
   const avg=avgOf(data,'score');
-  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>d.date?.startsWith(p)).length,planned:KPI_CONFIG.auditMonthly.target}));
-  const cumul=MONTHS.map(({m,p})=>({month:m,total:data.filter(d=>d.date<=p+'-31').length,aPlus:data.filter(d=>d.date<=p+'-31'&&d.auditType==='A+').length}));
-  const cols=[{key:'date',label:'Date'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'auditorName',label:'Auditor'},{key:'auditType',label:'Grade'},{key:'score',label:'Score',render:v=><span style={{fontWeight:700,color:+v>=90?'#4ade80':+v>=75?'#FFD700':'#f87171'}}>{v}%</span>},{key:'remarks',label:'Remarks'}];
-  const add=async()=>{if(!chkForm(form,[['date','Date required'],['showroomName','Showroom required'],['score','Score required',isScore]],showToast))return;setSaving(true);await addRecord('ch_showroom_audit',{...form,score:+form.score},{trigger:'audit_low'});showToast('Audit recorded');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title="KPI 08 · Showroom Audit" desc="Track showroom audits across the channel network" metrics={[{value:data.length,label:'Audits Done'},{value:`${avg}%`,label:'Avg Score',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi8" kpiHealth={kpiHealth}>
-    <G2 left={<><SL text="Planned vs Actual Audits"/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'planned',label:'Planned'}]} colors={['#fb923c','rgba(255,255,255,.12)']} height={165}/></>} right={<><SL text="Cumulative Audit Trend"/><AreaChartSVG data={cumul} areas={[{key:'total',label:'Total'},{key:'aPlus',label:'A+',dash:true}]} colors={['#fb923c','#FFD700']} height={165}/></>}/>
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi8',p)}));
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi8',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
+  const cols=[{key:'month',label:'Month'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'auditorName',label:'Auditor'},{key:'auditType',label:'Grade'},{key:'score',label:'Score',render:v=><span style={{fontWeight:700,color:+v>=90?'#4ade80':+v>=75?'#FFD700':'#f87171'}}>{v}%</span>},{key:'remarks',label:'Remarks'}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['showroomName','Showroom required'],['score','Score required',isScore]],showToast))return;setSaving(true);await addRecord('ch_showroom_audit',{...form,score:+form.score},{trigger:'audit_low'});showToast('Audit recorded');reset();setOpen(false);setSaving(false);};
+  return(<KPICard title="KPI 08 · Showroom Audit" desc="Track showroom audits across the channel network" metrics={[{value:data.length,label:'Audits Done'},{value:`${avg}%`,label:'Avg Score',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi8" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
+    <FYBand kpiId="kpi8" actual={data.length} getTarget={getTarget} color="#fb923c"/>
+    <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#fb923c','rgba(255,255,255,.12)']} height={165}/></>} right={<><SL text="Avg Score by Zone"/><BarChartSVG data={ZONES.map(z=>({zone:z,avg:avgOf(data.filter(d=>d.zone===z),'score')}))} bars={[{key:'avg',label:'Avg Score'}]} xKey="zone" colors={['#fb923c']} height={165}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_audit',id)} onEdit={(id, updated) => updateRecord('ch_showroom_audit', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add Showroom Audit Record">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Showroom Name" required><input value={form.showroomName} onChange={e=>set('showroomName',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
         <FF label="Auditor"><TeamSel value={form.auditorName} onChange={v=>set('auditorName',v)}/></FF>
@@ -1604,21 +1764,23 @@ function KPI8({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,k
   </KPICard>);
 }
 
-function KPI9({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI9({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_rnr');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({date:'',recipientName:'',zone:'',rewardType:'Monthly',category:'Top Channel Lead',amount:'',remarks:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,recipientName:'',zone:'',rewardType:'Monthly',category:'Top Channel Lead',amount:'',remarks:''});
   const totalAmt=sumOf(data,'amount');
-  const monthly=MONTHS.map(({m,p})=>({month:m,count:data.filter(d=>d.date?.startsWith(p)).length,plan:KPI_CONFIG.rnrMonthly.target}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi9',p)}));
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi9',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
   const byCat=REWARD_CATS.map((c,i)=>({name:c.replace(/Best |Top /g,''),value:data.filter(d=>d.category===c).length,color:['#FFD700','#00B4D8','#a78bfa','#4ade80'][i]}));
-  const cols=[{key:'date',label:'Date'},{key:'recipientName',label:'Recipient'},{key:'zone',label:'Zone'},{key:'rewardType',label:'Type'},{key:'category',label:'Category'},{key:'amount',label:'Amount',render:v=><span style={{color:'#FFD700',fontWeight:700}}>₹{Number(v).toLocaleString()}</span>},{key:'remarks',label:'Remarks'}];
-  const add=async()=>{if(!chkForm(form,[['date','Date required'],['recipientName','Recipient required']],showToast))return;if(form.amount&&!isPosNum(form.amount)){showToast('Amount must be positive','error');return;}setSaving(true);await addRecord('ch_rnr',{...form,amount:+form.amount||0});showToast('R&R award recorded');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title="KPI 09 · R&R Programme" desc="Track Rewards & Recognition awards" metrics={[{value:data.length,label:'Total Awards',color:'#FFD700'},{value:fmtK(totalAmt),label:'Total Amount',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi9" kpiHealth={kpiHealth}>
-    <G2 left={<><SL text="Monthly R&R Count vs Plan"/><BarChartSVG data={monthly} bars={[{key:'count',label:'Awarded'},{key:'plan',label:'Plan'}]} colors={['#FFD700','rgba(255,255,255,.12)']} height={165}/></>}
+  const cols=[{key:'month',label:'Month'},{key:'recipientName',label:'Recipient'},{key:'zone',label:'Zone'},{key:'rewardType',label:'Type'},{key:'category',label:'Category'},{key:'amount',label:'Amount',render:v=><span style={{color:'#FFD700',fontWeight:700}}>₹{Number(v).toLocaleString()}</span>},{key:'remarks',label:'Remarks'}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['recipientName','Recipient required']],showToast))return;if(form.amount&&!isPosNum(form.amount)){showToast('Amount must be positive','error');return;}setSaving(true);await addRecord('ch_rnr',{...form,amount:+form.amount||0});showToast('R&R award recorded');reset();setOpen(false);setSaving(false);};
+  return(<KPICard title="KPI 09 · R&R Programme" desc="Track Rewards & Recognition awards" metrics={[{value:data.length,label:'Total Awards',color:'#FFD700'},{value:fmtK(totalAmt),label:'Total Amount',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi9" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
+    <FYBand kpiId="kpi9" actual={data.length} getTarget={getTarget} color="#FFD700"/>
+    <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#FFD700','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="By Award Category"/><div style={{display:'flex',flexDirection:'column',gap:9,marginBottom:14}}>{byCat.map(c=><div key={c.name} style={{display:'flex',alignItems:'center',gap:9}}><span style={{fontSize:11,color:'rgba(255,255,255,.6)',width:100,flexShrink:0}}>{c.name}</span><div style={{flex:1,height:18,borderRadius:5,background:'rgba(255,255,255,.05)'}}><div style={{width:`${data.length?(c.value/data.length)*100:0}%`,height:'100%',borderRadius:5,background:c.color}}/></div><b style={{fontSize:12,color:'#fff',minWidth:16,textAlign:'right'}}>{c.value}</b></div>)}</div></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_rnr',id)} onEdit={(id, updated) => updateRecord('ch_rnr', id, updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add R&R Award">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Recipient Name" required><input value={form.recipientName} onChange={e=>set('recipientName',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
         <FF label="Reward Type"><Sel value={form.rewardType} onChange={v=>set('rewardType',v)} opts={REWARD_TYPES}/></FF>
@@ -1633,11 +1795,13 @@ function KPI9({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,k
 
 
 /* ═══ GENERIC FinancialKPI + ScoreKPI ══════════════════════ */
-function FinancialKPI({title,desc,col,amtKey,planKey,color,isLakhs,extraCols=[],addFields,perms,showToast,getFiltered,addRecord,deleteRecord,updateRecord,kpiId,kpiHealth}){
+function FinancialKPI({title,desc,col,amtKey,planKey,color,isLakhs,extraCols=[],addFields,perms,showToast,getFiltered,addRecord,deleteRecord,updateRecord,kpiId,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered(col);const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const init=addFields.reduce((a,f)=>({...a,[f.key]:f.default||''}),{});const[form,set,reset]=useForm(init);
   const totalA=sumOf(data,amtKey),totalP=sumOf(data,planKey),ach=safePct(totalA,totalP);
   const fmt=v=>isLakhs?fmtLakhs(v):fmtRupees(v);
+  const finMonthly=MONTHS.map(({m,p})=>({month:m,actual:sumOf(data.filter(d=>(d.month||d.date?.slice(0,7))===p),amtKey),target:getTarget(kpiId,p)}));
+  const finFyTarget=MONTHS.reduce((s,{p})=>s+getTarget(kpiId,p),0);const finForecast=Math.round((totalA/Math.max(ELAPSED_MONTHS,1))*12);
   const monthly=MONTHS.map(({m,p})=>{const rows=data.filter(d=>d.date?.startsWith(p));return{month:m,actual:isLakhs?+rows.reduce((s,r)=>s+(+(r[amtKey]||0)),0).toFixed(1):Math.round(rows.reduce((s,r)=>s+(+(r[amtKey]||0)),0)),plan:isLakhs?+rows.reduce((s,r)=>s+(+(r[planKey]||0)),0).toFixed(1):Math.round(rows.reduce((s,r)=>s+(+(r[planKey]||0)),0))};});
   const cumul=MONTHS.map(({m,p})=>{const up=data.filter(d=>d.date<=p+'-31');return{month:m,actual:isLakhs?+up.reduce((s,r)=>s+(+(r[amtKey]||0)),0).toFixed(1):Math.round(up.reduce((s,r)=>s+(+(r[amtKey]||0)),0)),plan:isLakhs?+up.reduce((s,r)=>s+(+(r[planKey]||0)),0).toFixed(1):Math.round(up.reduce((s,r)=>s+(+(r[planKey]||0)),0))};});
   const baseCols=[{key:'date',label:'Date'},{key:'zone',label:'Zone'},...extraCols,{key:amtKey,label:`Actual ${isLakhs?'(₹L)':'(₹)'}`,render:v=><span style={{color,fontWeight:700}}>{fmt(v)}</span>},{key:planKey,label:`Plan ${isLakhs?'(₹L)':'(₹)'}`,render:v=><span style={{fontFamily:'monospace'}}>{fmt(v)}</span>},{key:'_a',label:'Achievement %',render:(_,row)=><AchBar value={+(row[amtKey]||0)} plan={+(row[planKey]||0)}/>},{key:'remarks',label:'Remarks'}];
@@ -1655,15 +1819,18 @@ function FinancialKPI({title,desc,col,amtKey,planKey,color,isLakhs,extraCols=[],
   </KPICard>);
 }
 
-function ScoreKPI({title,desc,col,scoreKey,color,radarParams,extraCols=[],addFields,perms,showToast,getFiltered,addRecord,deleteRecord,updateRecord,kpiId,kpiHealth}){
+function ScoreKPI({title,desc,col,scoreKey,color,radarParams,extraCols=[],addFields,perms,showToast,getFiltered,addRecord,deleteRecord,updateRecord,kpiId,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered(col);const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const init=addFields.reduce((a,f)=>({...a,[f.key]:f.default||''}),{});const[form,set,reset]=useForm(init);
   const avg=avgOf(data,scoreKey);
   const radarData=radarParams.map(rp=>({subject:rp.label,value:avgOf(data,rp.key)}));
+  const scoreMonthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget(kpiId,p)}));
+  const scoreFyTarget=MONTHS.reduce((s,{p})=>s+getTarget(kpiId,p),0);const scoreForecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
   const PCOLS=['#00B4D8','#a78bfa','#f87171','#4ade80'];
   const baseCols=[{key:'date',label:'Date'},...extraCols,{key:'zone',label:'Zone'},{key:'grade',label:'Grade',render:v=><span style={{color:'#FFD700',fontWeight:700}}>{v}</span>},{key:scoreKey,label:'Score /100',render:v=><span style={{fontWeight:700,color:+v>=85?'#4ade80':+v>=70?'#FFD700':'#f87171'}}>{v}</span>},{key:'remarks',label:'Remarks'}];
   const add=async()=>{for(const f of addFields.filter(f=>f.required)){if(!String(form[f.key]||'').trim()){showToast(`${f.label} is required`,'error');return;}}if(!isScore(form[scoreKey])){showToast('Score must be 0–100','error');return;}const rec={...form,[scoreKey]:+form[scoreKey]};radarParams.forEach(rp=>{if(form[rp.key]!==undefined)rec[rp.key]=+form[rp.key]||0;});setSaving(true);await addRecord(col,rec);showToast('Score recorded');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title={title} desc={desc} metrics={[{value:`${avg}/100`,label:'Average Score',color:avg>=85?'#4ade80':'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId={kpiId} kpiHealth={kpiHealth}>
+  return(<KPICard title={title} desc={desc} metrics={[{value:`${avg}/100`,label:'Average Score',color:avg>=85?'#4ade80':'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId={kpiId} kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={scoreMonthly} fyTarget={scoreFyTarget} actual={data.length} forecast={scoreForecast}>
+    <FYBand kpiId={kpiId} actual={data.length} getTarget={getTarget} color={color}/>
     <G2 left={<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%'}}><Gauge value={avg} label="Avg Score (target 85%)" color={avg>=85?'#4ade80':'#FFD700'} size={155}/><div style={{display:'grid',gridTemplateColumns:`repeat(${Math.min(radarParams.length,4)},1fr)`,gap:8,marginTop:12,width:'100%'}}>{radarData.map((p,i)=><div key={p.subject} style={{borderRadius:9,padding:'9px 6px',textAlign:'center',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.07)'}}><div style={{fontSize:17,fontWeight:800,color:PCOLS[i%4],lineHeight:1}}>{p.value}%</div><div style={{fontSize:9,color:'rgba(255,255,255,.4)',marginTop:2}}>{p.subject}</div></div>)}</div></div>}
       right={<><SL text="Parameter Score Radar"/><RadarChartSVG data={radarData} color={color} height={230}/></>}/>
     <DTable cols={baseCols} data={data} onDelete={id=>deleteRecord(col,id)} onEdit={(id,updated)=>updateRecord(col,id,updated)} perms={perms}/>
@@ -1675,25 +1842,26 @@ function ScoreKPI({title,desc,col,scoreKey,color,radarParams,extraCols=[],addFie
 }
 
 /* ═══ KPI 15 ════════════════════════════════════════════════ */
-function KPI15({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI15({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_cft_feedback');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({date:'',prospectName:'',company:'',zone:'',cftDate:'',feedbackScore:'',adherenceStatus:'Adhered',remarks:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,prospectName:'',company:'',zone:'',feedbackScore:'',adherenceStatus:'Adhered',remarks:''});
   const adhered=data.filter(d=>d.adherenceStatus==='Adhered').length,partial=data.filter(d=>d.adherenceStatus==='Partial').length,notAdh=data.filter(d=>d.adherenceStatus==='Not Adhered').length;
   const adherPct=safePct(adhered,data.length),avgScore=avgOf(data,'feedbackScore');
-  const monthly=MONTHS.map(({m,p})=>({month:m,adhered:data.filter(d=>(d.cftDate||d.date)?.startsWith(p)&&d.adherenceStatus==='Adhered').length,partial:data.filter(d=>(d.cftDate||d.date)?.startsWith(p)&&d.adherenceStatus==='Partial').length,missed:data.filter(d=>(d.cftDate||d.date)?.startsWith(p)&&d.adherenceStatus==='Not Adhered').length}));
-  const cols=[{key:'date',label:'Date'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'cftDate',label:'CFT Date'},{key:'feedbackScore',label:'Score',render:v=><span style={{fontWeight:700,color:+v>=80?'#4ade80':+v>=60?'#FFD700':'#f87171'}}>{v}/100</span>},{key:'adherenceStatus',label:'SLA Status',render:v=><Badge status={v}/>},{key:'remarks',label:'Remarks'}];
-  const add=async()=>{if(!chkForm(form,[['date','Date required'],['prospectName','Name required']],showToast))return;if(form.feedbackScore&&!isScore(form.feedbackScore)){showToast('Score must be 0–100','error');return;}setSaving(true);await addRecord('ch_cft_feedback',{...form,feedbackScore:+form.feedbackScore||0},{trigger:'feedback_breach'});showToast('CFT Feedback SLA recorded');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title="KPI 15 · CFT Feedback SLA Adherence" desc="Track SLA compliance for CFT feedback submissions" metrics={[{value:`${adherPct}%`,label:'SLA Adhered',color:adherPct>=KPI_CONFIG.feedbackAdherence.target?'#4ade80':'#FFD700'},{value:`${avgScore}/100`,label:'Avg Score',color:'#00B4D8'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi15" kpiHealth={kpiHealth}>
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,adhered:data.filter(d=>(d.month||d.date?.slice(0,7))===p&&d.adherenceStatus==='Adhered').length,target:getTarget('kpi15',p)}));
+  const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi15',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
+  const cols=[{key:'month',label:'Month'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'feedbackScore',label:'Score',render:v=><span style={{fontWeight:700,color:+v>=80?'#4ade80':+v>=60?'#FFD700':'#f87171'}}>{v}/100</span>},{key:'adherenceStatus',label:'SLA Status',render:v=><Badge status={v}/>},{key:'remarks',label:'Remarks'}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['prospectName','Name required']],showToast))return;if(form.feedbackScore&&!isScore(form.feedbackScore)){showToast('Score must be 0–100','error');return;}setSaving(true);await addRecord('ch_cft_feedback',{...form,feedbackScore:+form.feedbackScore||0},{trigger:'feedback_breach'});showToast('CFT Feedback SLA recorded');reset();setOpen(false);setSaving(false);};
+  return(<KPICard title="KPI 15 · CFT Feedback SLA Adherence" desc="Track SLA compliance for CFT feedback submissions" metrics={[{value:`${adherPct}%`,label:'SLA Adhered',color:adherPct>=KPI_CONFIG.feedbackAdherence.target?'#4ade80':'#FFD700'},{value:`${avgScore}/100`,label:'Avg Score',color:'#00B4D8'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi15" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
+    <FYBand kpiId="kpi15" actual={data.length} getTarget={getTarget} color="#00B4D8"/>
     <G2 left={<><div style={{display:'flex',justifyContent:'center'}}><Gauge value={adherPct} label={`SLA Adherence (target ${KPI_CONFIG.feedbackAdherence.target}%)`} color={adherPct>=KPI_CONFIG.feedbackAdherence.target?'#4ade80':'#FFD700'} size={155}/></div><div style={{display:'flex',justifyContent:'center',gap:20,marginTop:10}}>{[[adhered,'#4ade80','Adhered'],[partial,'#FFD700','Partial'],[notAdh,'#f87171','Missed']].map(([v,c,l])=><div key={l} style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:800,color:c,lineHeight:1}}>{v}</div><div style={{fontSize:9,color:'rgba(255,255,255,.4)',marginTop:2}}>{l}</div></div>)}</div></>}
       right={<><SL text="Monthly SLA Adherence Trend"/><BarChartSVG data={monthly} bars={[{key:'adhered',label:'Adhered'},{key:'partial',label:'Partial'},{key:'missed',label:'Missed'}]} colors={['#4ade80','#FFD700','#f87171']} height={210}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_cft_feedback',id)} onEdit={(id,updated)=>updateRecord('ch_cft_feedback',id,updated)} perms={perms}/>
     <Modal open={open} onClose={()=>setOpen(false)} title="Add CFT Feedback SLA Record">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Date" required><input type="date" value={form.date} onChange={e=>set('date',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Prospect Name" required><input value={form.prospectName} onChange={e=>set('prospectName',e.target.value)} style={css.inp}/></FF>
         <FF label="Company"><input value={form.company} onChange={e=>set('company',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
-        <FF label="CFT Date"><input type="date" value={form.cftDate} onChange={e=>set('cftDate',e.target.value)} style={css.inp}/></FF>
         <FF label="Feedback Score (0–100)"><input type="number" min="0" max="100" value={form.feedbackScore} onChange={e=>set('feedbackScore',e.target.value)} style={css.inp}/></FF>
         <FF label="SLA Status"><Sel value={form.adherenceStatus} onChange={v=>set('adherenceStatus',v)} opts={STATUS_ADHERENCE}/></FF>
         <FF label="Remarks"><input value={form.remarks} onChange={e=>set('remarks',e.target.value)} style={css.inp}/></FF>
@@ -1704,7 +1872,7 @@ function KPI15({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,
 }
 
 /* ═══ KPI 16 ════════════════════════════════════════════════ */
-function KPI16({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth}){
+function KPI16({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_cad_tat');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
   const[form,set,reset]=useForm({date:'',projectName:'',zone:'',requestDate:'',deliveryDate:'',designerName:'',status:'Delivered'});
   const delivered=data.filter(d=>d.tat!=null),avgTAT=delivered.length?(delivered.reduce((s,d)=>s+(+d.tat||0),0)/delivered.length).toFixed(1):0;
@@ -1714,7 +1882,10 @@ function KPI16({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,
   const zoneAvg=ZONES.map(z=>{const zd=delivered.filter(d=>d.zone===z);return{zone:z,avg:zd.length?+(zd.reduce((s,d)=>s+(+d.tat||0),0)/zd.length).toFixed(1):0};}).filter(z=>z.avg>0);
   const cols=[{key:'date',label:'Date'},{key:'projectName',label:'Project'},{key:'zone',label:'Zone'},{key:'requestDate',label:'Requested'},{key:'deliveryDate',label:'Delivered'},{key:'tat',label:'TAT',render:v=>v!=null?<span style={{fontWeight:700,color:+v<=KPI_CONFIG.cadTAT.target?'#4ade80':'#f87171'}}>{v}d {+v<=KPI_CONFIG.cadTAT.target?'✓':'⚠'}</span>:<span style={{color:'rgba(255,255,255,.3)'}}>In Progress</span>},{key:'designerName',label:'Designer'},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
   const add=async()=>{if(!chkForm(form,[['date','Date required'],['projectName','Project name required']],showToast))return;if(form.requestDate&&!isDate(form.requestDate)){showToast('Invalid request date','error');return;}if(form.deliveryDate&&!isDate(form.deliveryDate)){showToast('Invalid delivery date','error');return;}const tat=calcTAT(form.requestDate,form.deliveryDate);if(tat!==null&&tat<0){showToast('Delivery cannot be before request date','error');return;}setSaving(true);await addRecord('ch_cad_tat',{...form,tat},{trigger:tat>KPI_CONFIG.cadTAT.target?'cad_delay':undefined});showToast('CAD TAT record added');reset();setOpen(false);setSaving(false);};
-  return(<KPICard title="KPI 16 · CAD Turnaround Time" desc={`Track CAD design turnaround — SLA target ≤${KPI_CONFIG.cadTAT.target} days`} metrics={[{value:`${avgTAT}d`,label:'Avg TAT',color:+avgTAT<=KPI_CONFIG.cadTAT.target?'#4ade80':'#f87171'},{value:`${onTimePct}%`,label:'Within SLA',color:'#00B4D8'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi16" kpiHealth={kpiHealth}>
+  const kpi16monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.date?.slice(0,7)||d.requestDate?.slice(0,7))===p).length,target:getTarget('kpi16',p)}));
+  const kpi16fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi16',p),0);const kpi16forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
+  return(<KPICard title="KPI 16 · CAD Turnaround Time" desc={`Track CAD design turnaround — SLA target ≤${KPI_CONFIG.cadTAT.target} days`} metrics={[{value:`${avgTAT}d`,label:'Avg TAT',color:+avgTAT<=KPI_CONFIG.cadTAT.target?'#4ade80':'#f87171'},{value:`${onTimePct}%`,label:'Within SLA',color:'#00B4D8'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi16" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={kpi16monthly} fyTarget={kpi16fyTarget} actual={data.length} forecast={kpi16forecast}>
+    <FYBand kpiId="kpi16" actual={data.length} getTarget={getTarget} color="#00B4D8"/>
     <G2 left={<><SL text={`TAT Trend — SLA ≤${KPI_CONFIG.cadTAT.target} days`}/><LineChartSVG data={tatTrend} lines={[{key:'tat',label:'TAT (days)'}]} xKey="date" colors={['#00B4D8']} refLine={KPI_CONFIG.cadTAT.target} refLabel={`SLA ${KPI_CONFIG.cadTAT.target}d`} formatY={v=>`${v}d`} height={180}/></>}
       right={<><SL text="Monthly SLA Adherence"/><BarChartSVG data={slaData} bars={[{key:'onTime',label:'On Time'},{key:'delayed',label:'Delayed'}]} colors={['#4ade80','#f87171']} height={140}/><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:12}}><div style={{borderRadius:11,padding:'11px',textAlign:'center',background:'rgba(74,222,128,.08)',border:'1px solid rgba(74,222,128,.2)'}}><div style={{fontSize:22,fontWeight:800,color:'#4ade80',lineHeight:1}}>{onTime}</div><div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginTop:3}}>On Time (≤{KPI_CONFIG.cadTAT.target}d)</div></div><div style={{borderRadius:11,padding:'11px',textAlign:'center',background:'rgba(248,113,113,.08)',border:'1px solid rgba(248,113,113,.2)'}}><div style={{fontSize:22,fontWeight:800,color:'#f87171',lineHeight:1}}>{delivered.length-onTime}</div><div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginTop:3}}>Delayed</div></div></div></>}/>
     <SL text="Zone-wise Avg TAT (days)"/>
@@ -1802,7 +1973,7 @@ function LoadingScreen(){return<div style={{minHeight:'100vh',display:'flex',fle
 /* ═══ APP ROOT ═══════════════════════════════════════════════ */
 function App(){
   const st=useAppState();
-  const{auth,loginEmail,loginViewOnly,logout,perms,activeKPI,setActiveKPI,sidebarCollapsed,setSidebarCollapsed,dateRange,setDateRange,selectedZone,setSelectedZone,addRecord,deleteRecord,updateRecord,getFiltered,showToast,toast,isLoading,isSyncing,lastSyncTime,isOnline,refreshData,exportCSV,kpiHealth,compactMode,setCompactMode,collections}=st;
+  const{auth,loginEmail,loginViewOnly,logout,perms,activeKPI,setActiveKPI,sidebarCollapsed,setSidebarCollapsed,dateRange,setDateRange,selectedZone,setSelectedZone,addRecord,deleteRecord,updateRecord,getFiltered,showToast,toast,isLoading,isSyncing,lastSyncTime,isOnline,refreshData,exportCSV,kpiHealth,compactMode,setCompactMode,collections,setMonthlyTarget,getTarget,getAllTargets}=st;
   const safeKpiHealth=kpiHealth||{};
   const safeCollections=collections||{};
   const isFileProtocol=typeof window!=='undefined'&&window.location.protocol==='file:';
@@ -1810,12 +1981,12 @@ function App(){
   if(!auth||auth.loading)return<LoadingScreen/>;
   if(!auth.user&&!auth.viewOnly)return<AuthPage onLogin={loginEmail} onViewOnly={loginViewOnly}/>;
 
-  const kp={getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth:safeKpiHealth};
+  const kp={getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth:safeKpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections};
 
 
   function renderPage(){switch(activeKPI){
     case'executive': return<ExecutiveCommandCenter collections={safeCollections} getFiltered={getFiltered} setActiveKPI={setActiveKPI} kpiHealth={safeKpiHealth}/>;
-    case'overview':  return<Overview getFiltered={getFiltered} setActiveKPI={setActiveKPI} kpiHealth={safeKpiHealth}/>;
+    case'overview':  return<Overview collections={safeCollections} setActiveKPI={setActiveKPI} kpiHealth={safeKpiHealth} getTarget={getTarget}/>;
     case'actions':   return<ActionCenter collections={safeCollections} addRecord={addRecord} deleteRecord={deleteRecord} updateRecord={updateRecord} perms={perms} showToast={showToast}/>;
     case'tasks':     return<TaskManager collections={safeCollections} addRecord={addRecord} deleteRecord={deleteRecord} updateRecord={updateRecord} perms={perms} showToast={showToast} auth={auth}/>;
     case'rca':       return<RCATracker collections={safeCollections} addRecord={addRecord} deleteRecord={deleteRecord} updateRecord={updateRecord} perms={perms} showToast={showToast}/>;
@@ -1833,7 +2004,7 @@ function App(){
     case'kpi14': return<ScoreKPI {...kp} title="KPI 14 · Partner Satisfaction Score (A & A+)" desc="Partner satisfaction survey scores" col="ch_partner_survey_score" scoreKey="surveyScore" color="#00B4D8" radarParams={R14} extraCols={[{key:'partnerName',label:'Partner'}]} addFields={F14} kpiId="kpi14"/>;
     case'kpi15': return<KPI15 {...kp}/>;
     case'kpi16': return<KPI16 {...kp}/>;
-    default:     return<Overview getFiltered={getFiltered} setActiveKPI={setActiveKPI} kpiHealth={kpiHealth}/>;
+    default:     return<Overview collections={safeCollections} setActiveKPI={setActiveKPI} kpiHealth={safeKpiHealth} getTarget={getTarget}/>;
   }}
 
   return(<div style={{display:'flex',height:'100vh',overflow:'hidden',background:`radial-gradient(ellipse at 12% 22%,rgba(0,180,216,.08) 0%,transparent 50%),radial-gradient(ellipse at 88% 78%,rgba(255,215,0,.05) 0%,transparent 50%),#0A1628`,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
