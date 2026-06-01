@@ -121,11 +121,11 @@ const KPI_CONFIG={
 };
 
 const COL_META={
-  ch_prospect_funnel:{dateField:'date'},ch_shortlisted:{dateField:'date'},
-  ch_prospect_cft:{dateField:'cftDate'},ch_partner_addition:{dateField:'onboardingDate'},
-  ch_showroom_cad:{dateField:'date'},ch_showroom_addition:{dateField:'openingDate'},
-  ch_partner_survey:{dateField:'date'},ch_showroom_audit:{dateField:'date'},
-  ch_rnr:{dateField:'date'},ch_crm_recovery:{dateField:'date'},
+  ch_prospect_funnel:{dateField:'month'},ch_shortlisted:{dateField:'month'},
+  ch_prospect_cft:{dateField:'month'},ch_partner_addition:{dateField:'month'},
+  ch_showroom_cad:{dateField:'month'},ch_showroom_addition:{dateField:'month'},
+  ch_partner_survey:{dateField:'month'},ch_showroom_audit:{dateField:'month'},
+  ch_rnr:{dateField:'month'},ch_crm_recovery:{dateField:'date'},
   ch_cse_salary:{dateField:'date'},ch_branding:{dateField:'date'},
   ch_audit_score:{dateField:'date'},ch_partner_survey_score:{dateField:'date'},
   ch_cft_feedback:{dateField:'cftDate'},ch_cad_tat:{dateField:'requestDate'},
@@ -366,12 +366,27 @@ function useAppState(){
   },[showToast]);
 
   const getFiltered=useCallback((col)=>{
-    const df=COL_META[col]?.dateField||'date';
+    const df=COL_META[col]?.dateField||'month';
     let data=collections[col]||[];
-    if(dateRange.start)data=data.filter(r=>{const d=r[df]||r.date||'';return d>=dateRange.start;});
-    if(dateRange.end)  data=data.filter(r=>{const d=r[df]||r.date||'';return!d||d<=dateRange.end;});
+    if(dateRange.start||dateRange.end){
+      data=data.filter(r=>{
+        // Support both month (YYYY-MM) and date (YYYY-MM-DD) fields
+        const raw=r[df]||r.month||r.date||'';
+        if(!raw)return true; // no date = always include
+        // Normalise to YYYY-MM for comparison with dateRange (YYYY-MM-DD)
+        const ym=raw.length>=7?raw.slice(0,7):raw;
+        const start=dateRange.start?dateRange.start.slice(0,7):'';
+        const end=dateRange.end?dateRange.end.slice(0,7):'';
+        return(!start||ym>=start)&&(!end||ym<=end);
+      });
+    }
     if(selectedZone!=='All')data=data.filter(r=>r.zone===selectedZone);
-    return[...data].sort((a,b)=>{const da=a[df]||a.date||'',db=b[df]||b.date||'';return db.localeCompare(da);});
+    // Sort newest first
+    return[...data].sort((a,b)=>{
+      const da=a[df]||a.month||a.date||'';
+      const db=b[df]||b.month||b.date||'';
+      return db.localeCompare(da);
+    });
   },[collections,dateRange,selectedZone]);
 
   /* KPI health checker — returns severity for each KPI */
@@ -1573,191 +1588,180 @@ function Overview({collections,setActiveKPI,kpiHealth,getTarget}){
 /* ═══ KPI 1-9 ════════════════════════════════════════════════ */
 function KPI1({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_prospect_funnel');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({month:CURRENT_MONTH,prospectName:'',company:'',zone:'',source:'',status:STATUS_PROSPECT[0],channelLead:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,prospectName:'',zone:'',status:'Interested'});
   const conv=data.filter(d=>d.status==='Converted').length;
   const bySrc=LEAD_SOURCES.map(s=>({source:s,count:data.filter(d=>d.source===s).length}));
-  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi1',p)}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>d.month===p).length,target:getTarget('kpi1',p)}));
   const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi1',p),0);
   const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
-  const cols=[{key:'month',label:'Month'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'source',label:'Source'},{key:'status',label:'Status',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
-  const add=async()=>{if(!chkForm(form,[['month','Month required'],['prospectName','Name required'],['channelLead','Channel lead required']],showToast))return;setSaving(true);await addRecord('ch_prospect_funnel',form);showToast('Prospect added');reset();setOpen(false);setSaving(false);};
+  const cols=[{key:'month',label:'Month'},{key:'prospectName',label:'Prospect'},{key:'zone',label:'Zone'},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['prospectName','Name required']],showToast))return;setSaving(true);await addRecord('ch_prospect_funnel',form);showToast('Prospect added');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 01 · Partner Prospect Funnel" desc="Track prospects showing interest in channel partnership" metrics={[{value:data.length,label:'Total Prospects'},{value:conv,label:'Converted',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi1" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
     <FYBand kpiId="kpi1" actual={data.length} getTarget={getTarget} color="#00B4D8"/>
     <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#00B4D8','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="By Lead Source"/><BarChartSVG data={bySrc} bars={[{key:'count',label:'Count'}]} xKey="source" colors={['#00B4D8']} height={165}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_prospect_funnel',id)} onEdit={(id, updated) => updateRecord('ch_prospect_funnel', id, updated)}  perms={perms}/>
-    <Modal open={open} onClose={()=>setOpen(false)} title="Add Prospect to Funnel">
+    <Modal open={open} onClose={()=>setOpen(false)} title="Log Prospect — KPI 01">
+      <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:14}}>Each entry counts as 1 prospect toward monthly target.</div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
-        <FF label="Prospect Name" required><input value={form.prospectName} onChange={e=>set('prospectName',e.target.value)} style={css.inp}/></FF>
-        <FF label="Company"><input value={form.company} onChange={e=>set('company',e.target.value)} style={css.inp}/></FF>
-        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select zone'},...ZONES]}/></FF>
-        <FF label="Lead Source"><Sel value={form.source} onChange={v=>set('source',v)} opts={[{v:'',l:'Select source'},...LEAD_SOURCES]}/></FF>
-        <FF label="Status" required><Sel value={form.status} onChange={v=>set('status',v)} opts={STATUS_PROSPECT}/></FF>
-        <FF label="Channel Lead" required><TeamSel value={form.channelLead} onChange={v=>set('channelLead',v)}/></FF>
+        <FF label="Prospect / Company Name" required><input value={form.prospectName} onChange={e=>set('prospectName',e.target.value)} style={css.inp} placeholder="e.g. Sharma Windows Pvt Ltd"/></FF>
+        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select zone (optional)'},...ZONES]}/></FF>
       </div>
-      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Add Prospect</button></div>
+      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Log Prospect</button></div>
     </Modal>
   </KPICard>);
 }
 
 function KPI2({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_shortlisted');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({month:CURRENT_MONTH,prospectName:'',company:'',zone:'',status:'Active',channelLead:''});
-  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi2',p)}));
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,prospectName:'',zone:'',status:'Active'});
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>d.month===p).length,target:getTarget('kpi2',p)}));
   const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi2',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
-  const cols=[{key:'month',label:'Month'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'status',label:'Status',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
-  const add=async()=>{if(!chkForm(form,[['month','Month required'],['prospectName','Name required'],['channelLead','Channel lead required']],showToast))return;setSaving(true);await addRecord('ch_shortlisted',form);showToast('Prospect shortlisted');reset();setOpen(false);setSaving(false);};
+  const cols=[{key:'month',label:'Month'},{key:'prospectName',label:'Prospect'},{key:'zone',label:'Zone'},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['prospectName','Name required']],showToast))return;setSaving(true);await addRecord('ch_shortlisted',form);showToast('Prospect shortlisted');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 02 · Prospect Shortlisting" desc="Track prospects shortlisted for channel partnership evaluation" metrics={[{value:data.length,label:'Total'},{value:data.filter(d=>d.status==='Active').length,label:'Active',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi2" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
     <FYBand kpiId="kpi2" actual={data.length} getTarget={getTarget} color="#00B4D8"/>
     <SL text={`Monthly vs Target (${FY_LABEL})`}/>
     <BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#00B4D8','rgba(255,255,255,.12)']} height={165}/>
     <div style={{marginTop:16}}><DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_shortlisted',id)} onEdit={(id, updated) => updateRecord('ch_shortlisted', id, updated)} perms={perms}/></div>
-    <Modal open={open} onClose={()=>setOpen(false)} title="Add Shortlisted Prospect">
+    <Modal open={open} onClose={()=>setOpen(false)} title="Log Shortlisted Prospect — KPI 02">
+      <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:14}}>Each entry counts as 1 shortlisted prospect toward monthly target.</div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
-        <FF label="Prospect Name" required><input value={form.prospectName} onChange={e=>set('prospectName',e.target.value)} style={css.inp}/></FF>
-        <FF label="Company"><input value={form.company} onChange={e=>set('company',e.target.value)} style={css.inp}/></FF>
-        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
-        <FF label="Shortlist Date"><input type="date" value={form.shortlistDate} onChange={e=>set('shortlistDate',e.target.value)} style={css.inp}/></FF>
-        <FF label="Status"><Sel value={form.status} onChange={v=>set('status',v)} opts={['Active','Pending']}/></FF>
-        <FF label="Channel Lead" required><TeamSel value={form.channelLead} onChange={v=>set('channelLead',v)}/></FF>
+        <FF label="Prospect / Company Name" required><input value={form.prospectName} onChange={e=>set('prospectName',e.target.value)} style={css.inp} placeholder="e.g. Mehta Infra Ltd"/></FF>
+        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select zone (optional)'},...ZONES]}/></FF>
       </div>
-      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Add</button></div>
+      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Log Prospect</button></div>
     </Modal>
   </KPICard>);
 }
 
 function KPI3({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_prospect_cft');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({month:CURRENT_MONTH,prospectName:'',company:'',zone:'',result:'Pass',channelLead:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,prospectName:'',zone:'',result:'Pass'});
   const passed=data.filter(d=>d.result==='Pass').length,passRate=safePct(passed,data.length);
-  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7)||d.cftDate?.slice(0,7))===p).length,target:getTarget('kpi3',p)}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>d.month===p).length,target:getTarget('kpi3',p)}));
   const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi3',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
-  const cols=[{key:'month',label:'Month'},{key:'prospectName',label:'Prospect'},{key:'company',label:'Company'},{key:'zone',label:'Zone'},{key:'result',label:'Result',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
-  const add=async()=>{if(!chkForm(form,[['month','Month required'],['prospectName','Name required'],['channelLead','Lead required']],showToast))return;setSaving(true);await addRecord('ch_prospect_cft',form,{trigger:form.result==='Fail'?'cft_fail':undefined});showToast('CFT clearance recorded');reset();setOpen(false);setSaving(false);};
+  const cols=[{key:'month',label:'Month'},{key:'prospectName',label:'Prospect'},{key:'zone',label:'Zone'},{key:'result',label:'Result',render:v=><Badge status={v}/>}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['prospectName','Name required']],showToast))return;setSaving(true);await addRecord('ch_prospect_cft',form,{trigger:form.result==='Fail'?'cft_fail':undefined});showToast('CFT clearance recorded');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 03 · Partner CFT Clearance" desc="Track Channel Partner Field Test clearances" metrics={[{value:data.length,label:'Total CFTs'},{value:`${passRate}%`,label:'Pass Rate',color:passRate>=KPI_CONFIG.cftPassRate.target?'#4ade80':'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi3" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
     <FYBand kpiId="kpi3" actual={data.length} getTarget={getTarget} color="#4ade80"/>
     <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#4ade80','rgba(255,255,255,.12)']} height={165}/></>}
       right={<div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%'}}><Gauge value={passRate} label={`Pass Rate (target ${KPI_CONFIG.cftPassRate.target}%)`} color={passRate>=KPI_CONFIG.cftPassRate.target?'#4ade80':'#FFD700'} size={150}/><div style={{display:'flex',gap:20,marginTop:10}}>{[[passed,'#4ade80','Cleared'],[data.length-passed,'#f87171','Not Cleared']].map(([v,c,l])=><div key={l} style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:800,color:c}}>{v}</div><div style={{fontSize:10,color:'rgba(255,255,255,.4)'}}>{l}</div></div>)}</div></div>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_prospect_cft',id)} onEdit={(id, updated) => updateRecord('ch_prospect_cft', id, updated)} perms={perms}/>
-    <Modal open={open} onClose={()=>setOpen(false)} title="Add CFT Clearance Record">
+    <Modal open={open} onClose={()=>setOpen(false)} title="Log CFT Clearance — KPI 03">
+      <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:14}}>Each Pass counts as 1 CFT clearance toward monthly target.</div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
-        <FF label="Prospect Name" required><input value={form.prospectName} onChange={e=>set('prospectName',e.target.value)} style={css.inp}/></FF>
-        <FF label="Company"><input value={form.company} onChange={e=>set('company',e.target.value)} style={css.inp}/></FF>
-        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
-        <FF label="CFT Date"><input type="date" value={form.cftDate} onChange={e=>set('cftDate',e.target.value)} style={css.inp}/></FF>
-        <FF label="Result"><Sel value={form.result} onChange={v=>set('result',v)} opts={STATUS_CFT}/></FF>
-        <FF label="Channel Lead" required><TeamSel value={form.channelLead} onChange={v=>set('channelLead',v)}/></FF>
+        <FF label="Prospect / Company Name" required><input value={form.prospectName} onChange={e=>set('prospectName',e.target.value)} style={css.inp} placeholder="e.g. Patel Glazing Works"/></FF>
+        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select zone (optional)'},...ZONES]}/></FF>
+        <FF label="CFT Result"><Sel value={form.result} onChange={v=>set('result',v)} opts={STATUS_CFT}/></FF>
       </div>
-      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Add CFT</button></div>
+      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Log CFT</button></div>
     </Modal>
   </KPICard>);
 }
 
 function KPI4({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_partner_addition');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({month:CURRENT_MONTH,partnerName:'',zone:'',partnerType:'Dealer',status:'Active',channelLead:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,partnerName:'',zone:'',partnerType:'Dealer',status:'Active'});
   const active=data.filter(d=>d.status==='Active').length;
-  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.onboardingDate?.slice(0,7)||d.date?.slice(0,7))===p).length,target:getTarget('kpi4',p)}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>d.month===p).length,target:getTarget('kpi4',p)}));
   const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi4',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
   const byType=PARTNER_TYPES.map((t,i)=>({name:t,value:data.filter(d=>d.partnerType===t).length,color:['#00B4D8','#FFD700','#a78bfa'][i]}));
   const byZone=ZONES.map(z=>({zone:z,count:data.filter(d=>d.zone===z).length})).filter(z=>z.count>0);
-  const cols=[{key:'month',label:'Month'},{key:'partnerName',label:'Partner'},{key:'zone',label:'Zone'},{key:'partnerType',label:'Type'},{key:'status',label:'Status',render:v=><Badge status={v}/>},{key:'channelLead',label:'Channel Lead'}];
-  const add=async()=>{if(!chkForm(form,[['month','Month required'],['partnerName','Partner name required'],['channelLead','Lead required']],showToast))return;setSaving(true);await addRecord('ch_partner_addition',form,{trigger:'partner_onboarded'});showToast('Partner onboarded — survey reminder created');reset();setOpen(false);setSaving(false);};
+  const cols=[{key:'month',label:'Month'},{key:'partnerName',label:'Partner'},{key:'zone',label:'Zone'},{key:'partnerType',label:'Type'},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['partnerName','Dealership name required']],showToast))return;setSaving(true);await addRecord('ch_partner_addition',{...form,status:'Active'});showToast('Partner onboarded ✓');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 04 · Partner Onboarding" desc="Track new channel partners onboarded across India" metrics={[{value:data.length,label:'Total Onboarded'},{value:active,label:'Active',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi4" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
     <FYBand kpiId="kpi4" actual={data.length} getTarget={getTarget} color="#4ade80"/>
     <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#4ade80','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="Partner Type Mix"/><div style={{display:'flex',flexDirection:'column',gap:9,marginBottom:12}}>{byType.map(t=><div key={t.name}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:'rgba(255,255,255,.6)'}}>{t.name}</span><b style={{color:'#fff'}}>{t.value}</b></div><div style={{height:6,borderRadius:3,background:'rgba(255,255,255,.06)'}}><div style={{width:`${data.length?(t.value/data.length)*100:0}%`,height:'100%',borderRadius:3,background:t.color}}/></div></div>)}</div><SL text="By Zone"/><DonutChartSVG data={byZone} labelKey="zone" valueKey="count" colors={ZONES.map(z=>ZONE_COLORS[z])} height={130}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_partner_addition',id)} onEdit={(id, updated) => updateRecord('ch_partner_addition', id, updated)} perms={perms}/>
-    <Modal open={open} onClose={()=>setOpen(false)} title="Add Channel Partner">
+    <Modal open={open} onClose={()=>setOpen(false)} title="Log Partner Onboarding — KPI 04">
+      <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:14}}>Each entry = 1 partner onboarded. Status is auto-set to Active.</div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
-        <FF label="Partner Name" required><input value={form.partnerName} onChange={e=>set('partnerName',e.target.value)} style={css.inp}/></FF>
-        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
+        <FF label="Month of Onboarding" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
+        <FF label="Dealership Name" required><input value={form.partnerName} onChange={e=>set('partnerName',e.target.value)} style={css.inp} placeholder="e.g. Ravi Aluminium Works"/></FF>
+        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select zone (optional)'},...ZONES]}/></FF>
         <FF label="Partner Type"><Sel value={form.partnerType} onChange={v=>set('partnerType',v)} opts={PARTNER_TYPES}/></FF>
-        <FF label="Status"><Sel value={form.status} onChange={v=>set('status',v)} opts={STATUS_PARTNER}/></FF>
-        <FF label="Channel Lead" required><TeamSel value={form.channelLead} onChange={v=>set('channelLead',v)}/></FF>
       </div>
-      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Onboard Partner</button></div>
+      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Log Onboarding</button></div>
     </Modal>
   </KPICard>);
 }
 
 function KPI5({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_showroom_cad');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({month:CURRENT_MONTH,showroomName:'',zone:'',cadType:'Full Layout',designerName:'',status:'Completed'});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,showroomName:'',zone:'',cadType:'Full Layout',status:'Completed'});
   const completed=data.filter(d=>d.status==='Completed').length;
-  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi5',p)}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>d.month===p).length,target:getTarget('kpi5',p)}));
   const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi5',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
   const byType=CAD_TYPES.map((t,i)=>({type:t,count:data.filter(d=>d.cadType===t).length,color:['#a78bfa','#00B4D8','#FFD700'][i]}));
-  const cols=[{key:'month',label:'Month'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'cadType',label:'CAD Type'},{key:'designerName',label:'Designer'},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
+  const cols=[{key:'month',label:'Month'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'cadType',label:'CAD Type'},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
   const add=async()=>{if(!chkForm(form,[['month','Month required'],['showroomName','Showroom required']],showToast))return;setSaving(true);await addRecord('ch_showroom_cad',form);showToast('CAD record added');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 05 · Showroom CAD Completion" desc="Track CAD designs completed for channel partner showrooms" metrics={[{value:data.length,label:'Total CADs'},{value:`${safePct(completed,data.length)}%`,label:'Completion',color:'#a78bfa'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi5" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
     <FYBand kpiId="kpi5" actual={data.length} getTarget={getTarget} color="#a78bfa"/>
     <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#a78bfa','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="By CAD Type"/><div style={{display:'flex',flexDirection:'column',gap:9,marginBottom:14}}>{byType.map(t=><div key={t.type}><div style={{display:'flex',justifyContent:'space-between',fontSize:11,marginBottom:3}}><span style={{color:'rgba(255,255,255,.6)'}}>{t.type}</span><b style={{color:'#fff'}}>{t.count}</b></div><div style={{height:6,borderRadius:3,background:'rgba(255,255,255,.06)'}}><div style={{width:`${data.length?(t.count/data.length)*100:0}%`,height:'100%',borderRadius:3,background:t.color}}/></div></div>)}</div><Gauge value={safePct(completed,data.length)} label="Completion %" color="#a78bfa" size={130}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_cad',id)} onEdit={(id, updated) => updateRecord('ch_showroom_cad', id, updated)} perms={perms}/>
-    <Modal open={open} onClose={()=>setOpen(false)} title="Add CAD Record">
+    <Modal open={open} onClose={()=>setOpen(false)} title="Log CAD Completion — KPI 05">
+      <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:14}}>Each entry = 1 CAD completed. Status auto-set to Completed.</div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
-        <FF label="Showroom Name" required><input value={form.showroomName} onChange={e=>set('showroomName',e.target.value)} style={css.inp}/></FF>
-        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
+        <FF label="Showroom Name" required><input value={form.showroomName} onChange={e=>set('showroomName',e.target.value)} style={css.inp} placeholder="e.g. Singh Glass Shoppe"/></FF>
+        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select zone (optional)'},...ZONES]}/></FF>
         <FF label="CAD Type"><Sel value={form.cadType} onChange={v=>set('cadType',v)} opts={CAD_TYPES}/></FF>
-        <FF label="Designer"><TeamSel value={form.designerName} onChange={v=>set('designerName',v)}/></FF>
-        <FF label="Status"><Sel value={form.status} onChange={v=>set('status',v)} opts={STATUS_CAD}/></FF>
       </div>
-      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Add CAD</button></div>
+      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Log CAD</button></div>
     </Modal>
   </KPICard>);
 }
 
 function KPI6({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_showroom_addition');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({month:CURRENT_MONTH,showroomName:'',zone:'',location:'',showroomType:'A',status:'Opened'});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,showroomName:'',zone:'',showroomType:'A',status:'Opened'});
   const opened=data.filter(d=>d.status==='Opened').length;
-  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.openingDate?.slice(0,7)||d.date?.slice(0,7))===p).length,target:getTarget('kpi6',p)}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>d.month===p).length,target:getTarget('kpi6',p)}));
   const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi6',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
-  const cols=[{key:'month',label:'Month'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'location',label:'Location'},{key:'showroomType',label:'Grade',render:v=><span style={{color:'#FFD700',fontWeight:700}}>{v}</span>},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
-  const add=async()=>{if(!chkForm(form,[['month','Month required'],['showroomName','Showroom name required']],showToast))return;setSaving(true);await addRecord('ch_showroom_addition',form,{trigger:'showroom_opened'});showToast('Showroom launch recorded — audit reminder created');reset();setOpen(false);setSaving(false);};
+  const cols=[{key:'month',label:'Month'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'showroomType',label:'Grade',render:v=><span style={{color:'#FFD700',fontWeight:700}}>{v}</span>},{key:'status',label:'Status',render:v=><Badge status={v}/>}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['showroomName','Showroom name required']],showToast))return;setSaving(true);await addRecord('ch_showroom_addition',form);showToast('Showroom launch recorded ✓');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 06 · Showroom Launch" desc="Track new partner showrooms commissioned across India" metrics={[{value:data.length,label:'Total'},{value:opened,label:'Launched',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi6" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
     <FYBand kpiId="kpi6" actual={data.length} getTarget={getTarget} color="#FFD700"/>
     <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#FFD700','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="By Grade"/><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9}}>{SHOWROOM_GRADES.map((g,i)=><div key={g} style={{borderRadius:11,padding:'11px',textAlign:'center',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.07)'}}><div style={{fontSize:22,fontWeight:800,color:['#FFD700','#00B4D8','#a78bfa','#fb923c'][i],lineHeight:1}}>{data.filter(d=>d.showroomType===g).length}</div><div style={{fontSize:11,color:'rgba(255,255,255,.45)',marginTop:3}}>Grade {g}</div></div>)}</div></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_addition',id)} onEdit={(id, updated) => updateRecord('ch_showroom_addition', id, updated)} perms={perms}/>
-    <Modal open={open} onClose={()=>setOpen(false)} title="Record Showroom Launch">
+    <Modal open={open} onClose={()=>setOpen(false)} title="Log Showroom Launch — KPI 06">
+      <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:14}}>Each entry = 1 showroom launched. Status auto-set to Opened.</div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
-        <FF label="Showroom Name" required><input value={form.showroomName} onChange={e=>set('showroomName',e.target.value)} style={css.inp}/></FF>
-        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
-        <FF label="Location"><input value={form.location} onChange={e=>set('location',e.target.value)} style={css.inp}/></FF>
+        <FF label="Month of Launch" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
+        <FF label="Showroom Name" required><input value={form.showroomName} onChange={e=>set('showroomName',e.target.value)} style={css.inp} placeholder="e.g. Kumar Windows Showroom"/></FF>
+        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select zone (optional)'},...ZONES]}/></FF>
         <FF label="Grade"><Sel value={form.showroomType} onChange={v=>set('showroomType',v)} opts={SHOWROOM_GRADES}/></FF>
-        <FF label="Status"><Sel value={form.status} onChange={v=>set('status',v)} opts={STATUS_SHOWROOM_OP}/></FF>
       </div>
-      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Add Showroom</button></div>
+      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Log Launch</button></div>
     </Modal>
   </KPICard>);
 }
 
 function KPI7({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_partner_survey');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({month:CURRENT_MONTH,partnerName:'',zone:'',surveyType:'Monthly',score:'',remarks:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,partnerName:'',zone:'',score:''});
   const avg=avgOf(data,'score');
-  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi7',p)}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>d.month===p).length,target:getTarget('kpi7',p)}));
   const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi7',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
   const radar=[{subject:'Support',value:Math.round(avg*1.02)},{subject:'Price',value:Math.round(avg*.96)},{subject:'Delivery',value:Math.round(avg*1.01)},{subject:'Quality',value:Math.round(avg*.99)},{subject:'Comms',value:Math.round(avg*.97)}];
-  const cols=[{key:'month',label:'Month'},{key:'partnerName',label:'Partner'},{key:'zone',label:'Zone'},{key:'surveyType',label:'Type'},{key:'score',label:'NPS Score',render:v=><span style={{fontWeight:700,color:+v>=85?'#4ade80':+v>=70?'#FFD700':'#f87171'}}>{v}/100</span>},{key:'remarks',label:'Remarks'}];
-  const add=async()=>{if(!chkForm(form,[['month','Month required'],['partnerName','Partner required'],['score','Score required',isScore]],showToast))return;setSaving(true);await addRecord('ch_partner_survey',{...form,score:+form.score},{trigger:'survey_low'});showToast('Survey recorded');reset();setOpen(false);setSaving(false);};
+  const cols=[{key:'month',label:'Month'},{key:'partnerName',label:'Partner'},{key:'zone',label:'Zone'},{key:'score',label:'NPS Score',render:v=><span style={{fontWeight:700,color:+v>=85?'#4ade80':+v>=70?'#FFD700':'#f87171'}}>{v}/100</span>}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['partnerName','Partner required'],['score','Score required',isScore]],showToast))return;setSaving(true);await addRecord('ch_partner_survey',{...form,score:+form.score});showToast('Survey recorded');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 07 · Partner NPS Survey" desc="Track partner satisfaction Net Promoter Scores" metrics={[{value:data.length,label:'Surveys'},{value:avg,label:'Avg NPS',color:'#FFD700'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi7" kpiHealth={kpiHealth}>
     <G2 left={<><SL text="Monthly Surveys vs Target"/><BarChartSVG data={monthly} bars={[{key:'surveys',label:'Surveys'},{key:'target',label:'Target'}]} colors={['#f472b6','rgba(255,255,255,.12)']} height={165}/></>} right={<><SL text="Parameter Radar"/><RadarChartSVG data={radar} color="#f472b6" height={210}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_partner_survey',id)} onEdit={(id, updated) => updateRecord('ch_partner_survey', id, updated)} perms={perms}/>
-    <Modal open={open} onClose={()=>setOpen(false)} title="Add Partner NPS Survey">
+    <Modal open={open} onClose={()=>setOpen(false)} title="Log NPS Survey — KPI 07">
+      <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:14}}>Each entry = 1 survey conducted. Score drives average NPS metric.</div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
         <FF label="Partner Name" required><input value={form.partnerName} onChange={e=>set('partnerName',e.target.value)} style={css.inp}/></FF>
         <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
-        <FF label="Survey Type"><Sel value={form.surveyType} onChange={v=>set('surveyType',v)} opts={SURVEY_TYPES}/></FF>
         <FF label="Score (0–100)" required><input type="number" min="0" max="100" value={form.score} onChange={e=>set('score',e.target.value)} style={css.inp}/></FF>
         <FF label="Remarks"><input value={form.remarks} onChange={e=>set('remarks',e.target.value)} style={css.inp}/></FF>
       </div>
@@ -1768,56 +1772,53 @@ function KPI7({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,k
 
 function KPI8({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_showroom_audit');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({month:CURRENT_MONTH,showroomName:'',zone:'',auditorName:'',auditType:'A',score:'',remarks:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,showroomName:'',zone:'',score:''});
   const avg=avgOf(data,'score');
-  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi8',p)}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>d.month===p).length,target:getTarget('kpi8',p)}));
   const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi8',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
-  const cols=[{key:'month',label:'Month'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'auditorName',label:'Auditor'},{key:'auditType',label:'Grade'},{key:'score',label:'Score',render:v=><span style={{fontWeight:700,color:+v>=90?'#4ade80':+v>=75?'#FFD700':'#f87171'}}>{v}%</span>},{key:'remarks',label:'Remarks'}];
-  const add=async()=>{if(!chkForm(form,[['month','Month required'],['showroomName','Showroom required'],['score','Score required',isScore]],showToast))return;setSaving(true);await addRecord('ch_showroom_audit',{...form,score:+form.score},{trigger:'audit_low'});showToast('Audit recorded');reset();setOpen(false);setSaving(false);};
+  const cols=[{key:'month',label:'Month'},{key:'showroomName',label:'Showroom'},{key:'zone',label:'Zone'},{key:'score',label:'Audit Score',render:v=><span style={{fontWeight:700,color:+v>=90?'#4ade80':+v>=75?'#FFD700':'#f87171'}}>{v}%</span>}];
+  const add=async()=>{if(!chkForm(form,[['month','Month required'],['showroomName','Showroom required'],['score','Score required',isScore]],showToast))return;setSaving(true);await addRecord('ch_showroom_audit',{...form,score:+form.score});showToast('Audit recorded');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 08 · Showroom Audit" desc="Track showroom audits across the channel network" metrics={[{value:data.length,label:'Audits Done'},{value:`${avg}%`,label:'Avg Score',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi8" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
     <FYBand kpiId="kpi8" actual={data.length} getTarget={getTarget} color="#fb923c"/>
     <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#fb923c','rgba(255,255,255,.12)']} height={165}/></>} right={<><SL text="Avg Score by Zone"/><BarChartSVG data={ZONES.map(z=>({zone:z,avg:avgOf(data.filter(d=>d.zone===z),'score')}))} bars={[{key:'avg',label:'Avg Score'}]} xKey="zone" colors={['#fb923c']} height={165}/></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_showroom_audit',id)} onEdit={(id, updated) => updateRecord('ch_showroom_audit', id, updated)} perms={perms}/>
-    <Modal open={open} onClose={()=>setOpen(false)} title="Add Showroom Audit Record">
+    <Modal open={open} onClose={()=>setOpen(false)} title="Log Audit — KPI 08">
+      <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:14}}>Each entry = 1 audit completed. Score drives avg audit score metric.</div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
-        <FF label="Showroom Name" required><input value={form.showroomName} onChange={e=>set('showroomName',e.target.value)} style={css.inp}/></FF>
-        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
-        <FF label="Auditor"><TeamSel value={form.auditorName} onChange={v=>set('auditorName',v)}/></FF>
-        <FF label="Grade"><Sel value={form.auditType} onChange={v=>set('auditType',v)} opts={AUDIT_GRADES}/></FF>
-        <FF label="Score % (0–100)" required><input type="number" min="0" max="100" value={form.score} onChange={e=>set('score',e.target.value)} style={css.inp}/></FF>
-        <FF label="Remarks"><input value={form.remarks} onChange={e=>set('remarks',e.target.value)} style={css.inp}/></FF>
+        <FF label="Showroom Name" required><input value={form.showroomName} onChange={e=>set('showroomName',e.target.value)} style={css.inp} placeholder="e.g. Verma Aluminium Centre"/></FF>
+        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select zone (optional)'},...ZONES]}/></FF>
+        <FF label="Audit Score % (0–100)" required><input type="number" min="0" max="100" value={form.score} onChange={e=>set('score',e.target.value)} style={css.inp} placeholder="e.g. 88"/></FF>
       </div>
-      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Add Audit</button></div>
+      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnP,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14}/>}Log Audit</button></div>
     </Modal>
   </KPICard>);
 }
 
 function KPI9({getFiltered,addRecord,deleteRecord,updateRecord,perms,showToast,kpiHealth,setMonthlyTarget,getTarget,getAllTargets,collections}){
   const data=getFiltered('ch_rnr');const[open,setOpen]=useState(false);const[saving,setSaving]=useState(false);
-  const[form,set,reset]=useForm({month:CURRENT_MONTH,recipientName:'',zone:'',rewardType:'Monthly',category:'Top Channel Lead',amount:'',remarks:''});
+  const[form,set,reset]=useForm({month:CURRENT_MONTH,recipientName:'',zone:'',category:'Top Channel Lead',amount:''});
   const totalAmt=sumOf(data,'amount');
-  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>(d.month||d.date?.slice(0,7))===p).length,target:getTarget('kpi9',p)}));
+  const monthly=MONTHS.map(({m,p})=>({month:m,actual:data.filter(d=>d.month===p).length,target:getTarget('kpi9',p)}));
   const fyTarget=MONTHS.reduce((s,{p})=>s+getTarget('kpi9',p),0);const forecast=Math.round((data.length/Math.max(ELAPSED_MONTHS,1))*12);
   const byCat=REWARD_CATS.map((c,i)=>({name:c.replace(/Best |Top /g,''),value:data.filter(d=>d.category===c).length,color:['#FFD700','#00B4D8','#a78bfa','#4ade80'][i]}));
-  const cols=[{key:'month',label:'Month'},{key:'recipientName',label:'Recipient'},{key:'zone',label:'Zone'},{key:'rewardType',label:'Type'},{key:'category',label:'Category'},{key:'amount',label:'Amount',render:v=><span style={{color:'#FFD700',fontWeight:700}}>₹{Number(v).toLocaleString()}</span>},{key:'remarks',label:'Remarks'}];
+  const cols=[{key:'month',label:'Month'},{key:'recipientName',label:'Recipient'},{key:'zone',label:'Zone'},{key:'category',label:'Category'},{key:'amount',label:'Amount',render:v=><span style={{color:'#FFD700',fontWeight:700}}>₹{Number(v).toLocaleString()}</span>}];
   const add=async()=>{if(!chkForm(form,[['month','Month required'],['recipientName','Recipient required']],showToast))return;if(form.amount&&!isPosNum(form.amount)){showToast('Amount must be positive','error');return;}setSaving(true);await addRecord('ch_rnr',{...form,amount:+form.amount||0});showToast('R&R award recorded');reset();setOpen(false);setSaving(false);};
   return(<KPICard title="KPI 09 · R&R Programme" desc="Track Rewards & Recognition awards" metrics={[{value:data.length,label:'Total Awards',color:'#FFD700'},{value:fmtK(totalAmt),label:'Total Amount',color:'#4ade80'}]} onAdd={()=>setOpen(true)} perms={perms} kpiId="kpi9" kpiHealth={kpiHealth} showToast={showToast} setMonthlyTarget={setMonthlyTarget} getTarget={getTarget} monthlyData={monthly} fyTarget={fyTarget} actual={data.length} forecast={forecast}>
     <FYBand kpiId="kpi9" actual={data.length} getTarget={getTarget} color="#FFD700"/>
     <G2 left={<><SL text={`Monthly vs Target (${FY_LABEL})`}/><BarChartSVG data={monthly} bars={[{key:'actual',label:'Actual'},{key:'target',label:'Target'}]} colors={['#FFD700','rgba(255,255,255,.12)']} height={165}/></>}
       right={<><SL text="By Award Category"/><div style={{display:'flex',flexDirection:'column',gap:9,marginBottom:14}}>{byCat.map(c=><div key={c.name} style={{display:'flex',alignItems:'center',gap:9}}><span style={{fontSize:11,color:'rgba(255,255,255,.6)',width:100,flexShrink:0}}>{c.name}</span><div style={{flex:1,height:18,borderRadius:5,background:'rgba(255,255,255,.05)'}}><div style={{width:`${data.length?(c.value/data.length)*100:0}%`,height:'100%',borderRadius:5,background:c.color}}/></div><b style={{fontSize:12,color:'#fff',minWidth:16,textAlign:'right'}}>{c.value}</b></div>)}</div></>}/>
     <DTable cols={cols} data={data} onDelete={id=>deleteRecord('ch_rnr',id)} onEdit={(id, updated) => updateRecord('ch_rnr', id, updated)} perms={perms}/>
-    <Modal open={open} onClose={()=>setOpen(false)} title="Add R&R Award">
+    <Modal open={open} onClose={()=>setOpen(false)} title="Log R&R Award — KPI 09">
+      <div style={{fontSize:11,color:'rgba(255,255,255,.4)',marginBottom:14}}>Each entry = 1 award given. Amount is optional.</div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <FF label="Month" required><input type="month" value={form.month} onChange={e=>set('month',e.target.value)} style={css.inp}/></FF>
-        <FF label="Recipient Name" required><input value={form.recipientName} onChange={e=>set('recipientName',e.target.value)} style={css.inp}/></FF>
-        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select'},...ZONES]}/></FF>
-        <FF label="Reward Type"><Sel value={form.rewardType} onChange={v=>set('rewardType',v)} opts={REWARD_TYPES}/></FF>
-        <FF label="Category"><Sel value={form.category} onChange={v=>set('category',v)} opts={REWARD_CATS}/></FF>
-        <FF label="Amount (₹)"><input type="number" min="0" value={form.amount} onChange={e=>set('amount',e.target.value)} style={css.inp}/></FF>
-        <FF label="Remarks"><input value={form.remarks} onChange={e=>set('remarks',e.target.value)} style={css.inp}/></FF>
+        <FF label="Recipient Name" required><input value={form.recipientName} onChange={e=>set('recipientName',e.target.value)} style={css.inp} placeholder="e.g. Arun Sharma"/></FF>
+        <FF label="Zone"><Sel value={form.zone} onChange={v=>set('zone',v)} opts={[{v:'',l:'Select zone (optional)'},...ZONES]}/></FF>
+        <FF label="Award Category"><Sel value={form.category} onChange={v=>set('category',v)} opts={REWARD_CATS}/></FF>
+        <FF label="Amount (₹) — optional"><input type="number" min="0" value={form.amount} onChange={e=>set('amount',e.target.value)} style={css.inp} placeholder="e.g. 5000"/></FF>
       </div>
-      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnAu,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14} color="#0A1628"/>}Record Award</button></div>
+      <div style={{display:'flex',gap:10,marginTop:16}}><button onClick={()=>setOpen(false)} style={{...css.btnG,flex:1}}>Cancel</button><button onClick={add} disabled={saving} style={{...css.btnAu,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:8}}>{saving&&<Spinner size={14} color="#0A1628"/>}Log Award</button></div>
     </Modal>
   </KPICard>);
 }
@@ -2056,7 +2057,7 @@ function App(){
       </main>
 
       <footer style={{flexShrink:0,padding:'5px 18px',borderTop:'1px solid rgba(255,255,255,.05)',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
-        <span style={{fontSize:10,color:'rgba(255,255,255,.18)'}}>AIS Windows · Channel Management KPI Command Center Powered with ❤️ by Sanju G</span>
+        <span style={{fontSize:10,color:'rgba(255,255,255,.18)'}}>AIS Windows · Channel Management KPI Command Center</span>
         <div style={{display:'flex',alignItems:'center',gap:10}}>
           <span style={{fontSize:10,color:isOnline?'rgba(74,222,128,.5)':'rgba(248,113,113,.5)',display:'flex',alignItems:'center',gap:4}}>
             <span style={{width:6,height:6,borderRadius:'50%',background:isOnline?'#4ade80':'#f87171',display:'inline-block'}}/>{isOnline?'Live':'Offline'}
